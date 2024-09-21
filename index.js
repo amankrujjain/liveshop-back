@@ -32,7 +32,14 @@ const Newslatter = require("./models/Newslatter")
 
 require("./dbConnect")
 const app = express()
-app.use(cors())
+
+const corsOptions = {
+    origin: 'https://your-frontend-on-vercel.vercel.app', // Allow the Vercel frontend
+    methods: ['GET', 'POST','PUT','PATCH','DELETE'], // Allowed methods
+    credentials: true, // Allow credentials (if needed)
+  };
+
+app.use(cors(corsOptions));
 
 app.use(express.json())
 app.use(express.static(path.join(__dirname, 'build')));
