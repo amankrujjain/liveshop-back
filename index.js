@@ -34,12 +34,15 @@ require("./dbConnect")
 const app = express()
 
 const corsOptions = {
-    origin: 'https://your-frontend-on-vercel.vercel.app', // Allow the Vercel frontend
-    methods: ['GET', 'POST','PUT','PATCH','DELETE'], // Allowed methods
-    credentials: true, // Allow credentials (if needed)
+    origin: 'https://liveshop-front.vercel.app', // Allow only your Vercel frontend
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],  // Allowed methods
+    allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
+    credentials: true, // Allow credentials (like cookies, tokens, etc.)
   };
 
 app.use(cors(corsOptions));
+
+app.options('*', cors(corsOptions));
 
 app.use(express.json())
 app.use(express.static(path.join(__dirname, 'build')));
