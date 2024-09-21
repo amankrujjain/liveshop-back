@@ -764,13 +764,14 @@ app.post('/register-webauthn/start', async (req,res)=>{
         }
 
         const userIDBuffer = crypto.randomBytes(16);
+        const userIDBase64 = userIDBuffer.toString('base64');
 
         console.log("Cryptoised bufferID", userIDBuffer)
 
         const options = await generateRegistrationOptions({
             rpName: "LiveShop",
-            rpID: 'localhost',
-            userID: userIDBuffer,
+            rpID: 'liveshop-back.onrender.com',
+            userID: userIDBase64,
             userName: username,
             attestationType: 'direct',
         });
@@ -808,8 +809,8 @@ app.post('/register-webauthn/verify', async(req,res)=>{
         const { verified, registrationInfo } = await verifyRegistrationResponse({
             credential: attestationResponse,
             expectedChallenge: expectedChallenge,
-            expectedOrigin: 'http://localhost:3000',
-            expectedRPID: 'localhost'
+            expectedOrigin: 'https://liveshop-front.vercel.app',
+            expectedRPID: 'liveshop-back.onrender.com'
         });
 
         if (verified) {
