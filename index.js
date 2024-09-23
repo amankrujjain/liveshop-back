@@ -1630,5 +1630,5 @@ app.post("/reset-password", async (req, res) => {
   }
 });
 // app.use('*', express.static(path.join(__dirname, 'build')));
-var port = process.env.PORT || 8000;
+var port = 8000;
 app.listen(port, () => console.log(`Server is Running at PORT ${port}`));
