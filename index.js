@@ -37,25 +37,26 @@ const frontendUrl =
     ? "https://liveshop-front.vercel.app" // Vercel frontend URL for production
     : "http://localhost:3000";
 
-    const expectedRPID = process.env.NODE_ENV === 'production'
-  ? 'liveshop-back.onrender.com'  // Production backend (Render)
-  : 'localhost'; 
+    const allowedOrigins = [
+        frontendUrl, // The correct URL for the frontend
+        'http://localhost:3000', // Local development
+      ];
 
 require("./dbConnect");
 const app = express();
 
 const corsOptions = {
-  origin: frontendUrl, // Allow only your Vercel frontend
-  methods: ["GET", "POST", "PUT", "DELETE"], // Allowed methods
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "X-Requested-With",
-    "Accept",
-  ], // Allowed headers
-  credentials: true, // Allow credentials (like cookies, tokens, etc.)
-};
-
+    origin: (origin, callback) => {
+      if (allowedOrigins.includes(origin) || !origin) {
+        callback(null, true); // Allow requests from allowed origins or undefined origins (e.g., Postman)
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept","username"],
+    credentials: true, // Allow credentials like cookies and tokens
+  };
 app.use(cors(corsOptions));
 
 app.options("*", cors(corsOptions));
