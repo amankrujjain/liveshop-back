@@ -36,7 +36,7 @@ const app = express()
 const corsOptions = {
     origin: 'https://liveshop-front.vercel.app', // Allow only your Vercel frontend
     methods: ['GET', 'POST', 'PUT', 'DELETE'],  // Allowed methods
-    allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'], // Allowed headers
     credentials: true, // Allow credentials (like cookies, tokens, etc.)
   };
 
@@ -58,7 +58,7 @@ app.use(session({
         ttl: 14 * 24 * 60 * 60 // Session TTL set to 14 days (for testing, this is fine).
     }),
     cookie: {
-        secure: false, // Not secure, as you're likely testing without HTTPS.
+        secure: true, // Not secure, as you're likely testing without HTTPS.
         httpOnly: true, // This will ensure cookies are not accessible via client-side JS.
         maxAge: 1000 * 60 * 15 // 15-minute expiration for testing purposes.
     }
