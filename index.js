@@ -889,8 +889,10 @@ app.post("/register-webauthn/start", async (req, res) => {
       }
   
       const userIDBuffer = crypto.randomBytes(16);
+      const userIDUint8Array = new Uint8Array(userIDBuffer);
   
-      console.log("Cryptoised bufferID", userIDBuffer);
+      console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
+
   
       const RPID = process.env.NODE_ENV === 'production'
         ? 'liveshop-back.onrender.com'  // Render backend for production (without https://)
@@ -899,9 +901,16 @@ app.post("/register-webauthn/start", async (req, res) => {
       const options = await generateRegistrationOptions({
         rpName: "LiveShop",
         rpID: RPID,
-        userID: userIDBuffer,
+        userID: userIDUint8Array,
         userName: username,
-        attestationType: "direct",
+        attestationType: "none",
+        allowCredentials:[],
+        excludeCredentials: user.webAuthnCredentials.map(cred =>({
+          id: cred.id,
+          type: 'public-key',
+          transports:['usb', 'ble', 'nfc', 'internal']
+        })),
+        supportedAlgorithmIDs: [-7, -257],
       });
   
       console.log("Generated options:", options);
@@ -948,6 +957,7 @@ app.post("/register-webauthn/start", async (req, res) => {
         expectedChallenge: expectedChallenge,
         expectedOrigin: expectedOrigin,
         expectedRPID: expectedRPID,
+        supportedAlgorithmIDs: [-7, -257],
       });
   
       if (verified) {
