@@ -9,6 +9,7 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const Razorpay = require("razorpay");
 const path = require("path");
+const { validationResult } = require("express-validator");
 const {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -37,26 +38,26 @@ const frontendUrl =
     ? "https://liveshop-front.vercel.app" // Vercel frontend URL for production
     : "http://localhost:3000";
 
-    const allowedOrigins = [
-        frontendUrl, // The correct URL for the frontend
-        'http://localhost:3000', // Local development
-      ];
+const allowedOrigins = [
+  frontendUrl, // The correct URL for the frontend
+  'http://localhost:3000', // Local development
+];
 
 require("./dbConnect");
 const app = express();
 
 const corsOptions = {
-    origin: (origin, callback) => {
-      if (allowedOrigins.includes(origin) || !origin) {
-        callback(null, true); // Allow requests from allowed origins or undefined origins (e.g., Postman)
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept","username"],
-    credentials: true, // Allow credentials like cookies and tokens
-  };
+  origin: (origin, callback) => {
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true); // Allow requests from allowed origins or undefined origins (e.g., Postman)
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "username"],
+  credentials: true, // Allow credentials like cookies and tokens
+};
 app.use(cors(corsOptions));
 
 app.options("*", cors(corsOptions));
@@ -569,7 +570,7 @@ app.put(
         data.description = req.body.description ?? data.description;
         if (req.files && req.files.pic1) {
           try {
-            fs.unlink("./public/uploads/" + data.pic1, () => {});
+            fs.unlink("./public/uploads/" + data.pic1, () => { });
           } catch (error) {
             console.log(error);
           }
@@ -577,20 +578,20 @@ app.put(
         }
         if (req.files && req.files.pic2) {
           try {
-            fs.unlink("./public/uploads/" + data.pic2, () => {});
-          } catch (error) {}
+            fs.unlink("./public/uploads/" + data.pic2, () => { });
+          } catch (error) { }
           data.pic2 = req.files.pic2[0].filename;
         }
         if (req.files && req.files.pic3) {
           try {
-            fs.unlink("./public/uploads/" + data.pic3, () => {});
-          } catch (error) {}
+            fs.unlink("./public/uploads/" + data.pic3, () => { });
+          } catch (error) { }
           data.pic3 = req.files.pic3[0].filename;
         }
         if (req.files && req.files.pic4) {
           try {
-            fs.unlink("./public/uploads/" + data.pic4, () => {});
-          } catch (error) {}
+            fs.unlink("./public/uploads/" + data.pic4, () => { });
+          } catch (error) { }
           data.pic4 = req.files.pic4[0].filename;
         }
         await data.save();
@@ -641,17 +642,17 @@ app.delete("/product/:_id", verifyToken, async (req, res) => {
     var data = await Product.findOne({ _id: req.params._id });
     if (data) {
       try {
-        fs.unlink("./public/uploads/" + data.pic1, () => {});
-      } catch (error) {}
+        fs.unlink("./public/uploads/" + data.pic1, () => { });
+      } catch (error) { }
       try {
-        fs.unlink("./public/uploads/" + data.pic2, () => {});
-      } catch (error) {}
+        fs.unlink("./public/uploads/" + data.pic2, () => { });
+      } catch (error) { }
       try {
-        fs.unlink("./public/uploads/" + data.pic3, () => {});
-      } catch (error) {}
+        fs.unlink("./public/uploads/" + data.pic3, () => { });
+      } catch (error) { }
       try {
-        fs.unlink("./public/uploads/" + data.pic4, () => {});
-      } catch (error) {}
+        fs.unlink("./public/uploads/" + data.pic4, () => { });
+      } catch (error) { }
       await data.delete();
       res.send({ result: "Done", message: "Record is Deleted!!!!!" });
     } else res.status(404).send({ result: "Fail", message: "Invalid ID" });
@@ -660,56 +661,46 @@ app.delete("/product/:_id", verifyToken, async (req, res) => {
   }
 });
 //API for User
-app.post("/user", async (req, res) => {
+app.post("/create-user", async (req, res) => {
   try {
-    var data = new User(req.body);
-    if (schema.validate(req.body.password)) {
-      bcrypt.hash(req.body.password, 12, async (error, hash) => {
-        if (error)
-          res
-            .status(500)
-            .send({ result: "Fail", message: "Internal Server Error" });
-        else {
-          data.password = hash;
-          await data.save();
-          res.send({ result: "Done", message: "User is Created!!!!!" });
-        }
+    const { name, username, phone, email, password } = req.body;
+
+    if(!name || !username || !phone || !email || !password){
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required"
       });
-    } else
-      res.status(401).send({
-        result: "Fail",
-        message:
-          "Password Must Containe Atleast 8 Character, Max 100, Must container atleast 1 Lower Case Alphabet,1 Upper Case Alphabet,1 Digit and it can't Contain any Space",
+    }
+
+    const existingUser = await User.findOne({username});
+
+    if(existingUser){
+      return res.status(409).json({
+        success: false,
+        message:" User already exists"
       });
+    };
+
+    const hashedPassword = await bcrypt.hash(password,12)
+
+    const newUser = await new User({
+      name, username, phone, email, password:hashedPassword
+    });
+
+    const result = await newUser.save();
+
+    return res.status(201).json({
+      status:true,
+      message:"User successfully created",
+      data: result
+    })
+
   } catch (error) {
-    if (error.keyValue)
-      res
-        .status(401)
-        .send({ result: "Fail", message: "User Name Must be Unique" });
-    else if (error.errors.name)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.name.message });
-    else if (error.errors.email)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.email.message });
-    else if (error.errors.phone)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.phone.message });
-    else if (error.errors.username)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.username.message });
-    else if (error.errors.password)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.password.message });
-    else
-      res
-        .status(500)
-        .send({ result: "Fail", message: "Internal Server Error" });
+    console.log("Error occured while creating a new user:", error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    })
   }
 });
 app.get("/user", verifyToken, async (req, res) => {
@@ -798,8 +789,8 @@ app.delete("/user/:_id", verifyToken, async (req, res) => {
     var data = await User.findOne({ _id: req.params._id });
     if (data) {
       try {
-        fs.unlink("./public/uploads/" + data.pic, () => {});
-      } catch (error) {}
+        fs.unlink("./public/uploads/" + data.pic, () => { });
+      } catch (error) { }
       await data.delete();
       res.send({ result: "Done", message: "Record is Deleted!!!!!" });
     } else res.status(404).send({ result: "Fail", message: "Invalid ID" });
@@ -877,218 +868,218 @@ app.post("/login", async (req, res) => {
 
 // WebAuthn Registration Start
 app.post("/register-webauthn/start", async (req, res) => {
-    try {
-      console.log("Requestbody in webauthN", req.body);
-      const { username } = req.body;
-      const user = await User.findOne({ username });
-  
-      if (!user) {
-        return res
-          .status(404)
-          .send({ result: "fail", message: "User not found" });
-      }
-  
-      const userIDBuffer = crypto.randomBytes(16);
-      const userIDUint8Array = new Uint8Array(userIDBuffer);
-  
-      console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
+  try {
+    console.log("Requestbody in webauthN", req.body);
+    const { username } = req.body;
+    const user = await User.findOne({ username });
 
-  
-      const RPID = process.env.NODE_ENV === 'production'
-        ? 'liveshop-back.onrender.com'  // Render backend for production (without https://)
-        : 'localhost';
-  
-      const options = await generateRegistrationOptions({
-        rpName: "LiveShop",
-        rpID: RPID,
-        userID: userIDUint8Array,
-        userName: username,
-        attestationType: "none",
-        allowCredentials:[],
-        excludeCredentials: user.webAuthnCredentials.map(cred =>({
-          id: cred.id,
-          type: 'public-key',
-          transports:['usb', 'ble', 'nfc', 'internal']
-        })),
-        supportedAlgorithmIDs: [-7, -257],
+    if (!user) {
+      return res
+        .status(404)
+        .send({ result: "fail", message: "User not found" });
+    }
+
+    const userIDBuffer = crypto.randomBytes(16);
+    const userIDUint8Array = new Uint8Array(userIDBuffer);
+
+    console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
+
+
+    const RPID = process.env.NODE_ENV === 'production'
+      ? 'liveshop-back.onrender.com'  // Render backend for production (without https://)
+      : 'localhost';
+
+    const options = await generateRegistrationOptions({
+      rpName: "LiveShop",
+      rpID: RPID,
+      userID: userIDUint8Array,
+      userName: username,
+      attestationType: "none",
+      allowCredentials: [],
+      excludeCredentials: user.webAuthnCredentials.map(cred => ({
+        id: cred.id,
+        type: 'public-key',
+        transports: ['usb', 'ble', 'nfc', 'internal']
+      })),
+      supportedAlgorithmIDs: [-7, -257],
+    });
+
+    console.log("Generated options:", options);
+
+    req.session.challenge = {
+      value: options.challenge,
+      expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
+    };
+    await req.session.save();
+    return res.send(options);
+  } catch (error) {
+    console.error("Error during WebAuthN registration start:", error.message);
+    res.status(500).send({
+      result: "fail",
+      message: "Internal Server Error during registration start",
+    });
+  }
+});
+
+// WebAuthn Registration Verification
+app.post("/register-webauthn/verify", async (req, res) => {
+  try {
+    const { username, attestationResponse } = req.body;
+    const user = await User.findOne({ username });
+
+    if (!user) {
+      return res
+        .status(404)
+        .send({ result: "Fail", message: "User not found" });
+    }
+
+    const expectedChallenge = req.session.challenge;
+
+    const expectedOrigin = process.env.NODE_ENV === "production"
+      ? "https://liveshop-front.vercel.app" // Vercel frontend for production
+      : "http://localhost:3000"; // Local frontend for development
+
+    const expectedRPID = process.env.NODE_ENV === 'production'
+      ? 'liveshop-back.onrender.com'  // Backend domain for production
+      : 'localhost';
+
+    const { verified, registrationInfo } = await verifyRegistrationResponse({
+      credential: attestationResponse,
+      expectedChallenge: expectedChallenge,
+      expectedOrigin: expectedOrigin,
+      expectedRPID: expectedRPID,
+      supportedAlgorithmIDs: [-7, -257],
+    });
+
+    if (verified) {
+      user.webAuthnCredentials.push({
+        id: registrationInfo.credentialID,
+        publicKey: registrationInfo.credentialPublicKey,
+        counter: registrationInfo.counter,
       });
-  
-      console.log("Generated options:", options);
-  
-      req.session.challenge = {
-        value: options.challenge,
-        expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
-      };
-      await req.session.save();
-      return res.send(options);
-    } catch (error) {
-      console.error("Error during WebAuthN registration start:", error.message);
-      res.status(500).send({
-        result: "fail",
-        message: "Internal Server Error during registration start",
+      await user.save();
+
+      res.send({ result: "Done", message: "WebAuthn credentials registered" });
+    } else {
+      return res
+        .status(400)
+        .send({ result: "fail", message: "WebAuthn registration failed" });
+    }
+  } catch (error) {
+    console.error(
+      "Error during WebAuthN registration verification:",
+      error.message
+    );
+    res.status(500).send({
+      result: "fail",
+      message: "Internal Server Error during registration verification",
+    });
+  }
+});
+
+// WebAuthn Login Start
+app.post("/webauthn/login", async (req, res) => {
+  try {
+    const { username } = req.body;
+    const user = await User.findOne({ username });
+
+    if (!user) {
+      return res
+        .status(404)
+        .send({ result: "Fail", message: "User not found" });
+    }
+
+    // Check if the user has any WebAuthn credentials
+    if (!user.webAuthnCredentials || user.webAuthnCredentials.length === 0) {
+      return res.status(404).send({
+        result: "Fail",
+        message: "No WebAuthn credentials found for this user",
       });
     }
-  });
-  
-  // WebAuthn Registration Verification
-  app.post("/register-webauthn/verify", async (req, res) => {
-    try {
-      const { username, attestationResponse } = req.body;
-      const user = await User.findOne({ username });
-  
-      if (!user) {
-        return res
-          .status(404)
-          .send({ result: "Fail", message: "User not found" });
-      }
-  
-      const expectedChallenge = req.session.challenge;
-  
-      const expectedOrigin = process.env.NODE_ENV === "production"
-        ? "https://liveshop-front.vercel.app" // Vercel frontend for production
-        : "http://localhost:3000"; // Local frontend for development
-  
-      const expectedRPID = process.env.NODE_ENV === 'production'
-        ? 'liveshop-back.onrender.com'  // Backend domain for production
-        : 'localhost';
-  
-      const { verified, registrationInfo } = await verifyRegistrationResponse({
-        credential: attestationResponse,
-        expectedChallenge: expectedChallenge,
-        expectedOrigin: expectedOrigin,
-        expectedRPID: expectedRPID,
-        supportedAlgorithmIDs: [-7, -257],
-      });
-  
-      if (verified) {
-        user.webAuthnCredentials.push({
-          id: registrationInfo.credentialID,
-          publicKey: registrationInfo.credentialPublicKey,
-          counter: registrationInfo.counter,
-        });
-        await user.save();
-  
-        res.send({ result: "Done", message: "WebAuthn credentials registered" });
-      } else {
-        return res
-          .status(400)
-          .send({ result: "fail", message: "WebAuthn registration failed" });
-      }
-    } catch (error) {
-      console.error(
-        "Error during WebAuthN registration verification:",
-        error.message
-      );
-      res.status(500).send({
-        result: "fail",
-        message: "Internal Server Error during registration verification",
-      });
+
+    const options = await generateAuthenticationOptions({
+      allowCredentials: user.webAuthnCredentials.map((cred) => ({
+        id: cred.id,
+        type: "public-key",
+        transports: ["usb", "ble", "nfc", "internal"],
+      })),
+      userVerification: "preferred",
+    });
+
+    req.session.challenge = options.challenge;
+    return res.send(options);
+  } catch (error) {
+    console.error("Error during WebAuthN login start:", error.message);
+    res.status(500).send({
+      result: "fail",
+      message: "Internal Server Error during login start",
+    });
+  }
+});
+
+// WebAuthn Login Verification
+app.post("/login-webauthn/verify", async (req, res) => {
+  try {
+    const { username, authResponse } = req.body;
+
+    const user = await User.findOne({ username });
+
+    if (!user) {
+      return res
+        .status(404)
+        .send({ result: "Fail", message: "User not found" });
     }
-  });
-  
-  // WebAuthn Login Start
-  app.post("/webauthn/login", async (req, res) => {
-    try {
-      const { username } = req.body;
-      const user = await User.findOne({ username });
-  
-      if (!user) {
-        return res
-          .status(404)
-          .send({ result: "Fail", message: "User not found" });
-      }
-  
-      // Check if the user has any WebAuthn credentials
-      if (!user.webAuthnCredentials || user.webAuthnCredentials.length === 0) {
-        return res.status(404).send({
-          result: "Fail",
-          message: "No WebAuthn credentials found for this user",
-        });
-      }
-  
-      const options = await generateAuthenticationOptions({
-        allowCredentials: user.webAuthnCredentials.map((cred) => ({
-          id: cred.id,
-          type: "public-key",
-          transports: ["usb", "ble", "nfc", "internal"],
-        })),
-        userVerification: "preferred",
-      });
-  
-      req.session.challenge = options.challenge;
-      return res.send(options);
-    } catch (error) {
-      console.error("Error during WebAuthN login start:", error.message);
-      res.status(500).send({
-        result: "fail",
-        message: "Internal Server Error during login start",
-      });
+
+    const expectedChallenge = req.session.challenge;
+    const credential = user.webAuthnCredentials.find(
+      (cred) => cred.id === authResponse.id
+    );
+
+    if (!credential) {
+      return res
+        .status(404)
+        .send({ result: "Fail", message: "Credentials not found" });
     }
-  });
-  
-  // WebAuthn Login Verification
-  app.post("/login-webauthn/verify", async (req, res) => {
-    try {
-      const { username, authResponse } = req.body;
-  
-      const user = await User.findOne({ username });
-  
-      if (!user) {
-        return res
-          .status(404)
-          .send({ result: "Fail", message: "User not found" });
-      }
-  
-      const expectedChallenge = req.session.challenge;
-      const credential = user.webAuthnCredentials.find(
-        (cred) => cred.id === authResponse.id
-      );
-  
-      if (!credential) {
-        return res
-          .status(404)
-          .send({ result: "Fail", message: "Credentials not found" });
-      }
-  
-      const expectedOrigin = process.env.NODE_ENV === "production"
-        ? "https://liveshop-front.vercel.app"
-        : "http://localhost:3000";
-  
-      const expectedRPID = process.env.NODE_ENV === 'production'
-        ? 'liveshop-back.onrender.com'
-        : 'localhost';
-  
-      const { verified, authenticationInfo } = await verifyAuthenticationResponse({
-        credential: authResponse,
-        expectedChallenge: expectedChallenge,
-        expectedOrigin: expectedOrigin,
-        expectedRPID: expectedRPID,
-        authenticator: {
-          counter: credential.counter,
-          credentialPublicKey: credential.publicKey,
-        },
-      });
-  
-      if (verified) {
-        credential.counter = authenticationInfo.newCounter;
-        await user.save();
-  
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-        res.send({ result: "Done", token });
-      } else {
-        res
-          .status(400)
-          .send({ result: "Fail", message: "Authentication failed" });
-      }
-    } catch (error) {
-      console.error("Error during WebAuthN login verification:", error.message);
-      res.status(500).send({
-        result: "fail",
-        message: "Internal Server Error during login verification",
-      });
+
+    const expectedOrigin = process.env.NODE_ENV === "production"
+      ? "https://liveshop-front.vercel.app"
+      : "http://localhost:3000";
+
+    const expectedRPID = process.env.NODE_ENV === 'production'
+      ? 'liveshop-back.onrender.com'
+      : 'localhost';
+
+    const { verified, authenticationInfo } = await verifyAuthenticationResponse({
+      credential: authResponse,
+      expectedChallenge: expectedChallenge,
+      expectedOrigin: expectedOrigin,
+      expectedRPID: expectedRPID,
+      authenticator: {
+        counter: credential.counter,
+        credentialPublicKey: credential.publicKey,
+      },
+    });
+
+    if (verified) {
+      credential.counter = authenticationInfo.newCounter;
+      await user.save();
+
+      const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+      res.send({ result: "Done", token });
+    } else {
+      res
+        .status(400)
+        .send({ result: "Fail", message: "Authentication failed" });
     }
-  });
-  
+  } catch (error) {
+    console.error("Error during WebAuthN login verification:", error.message);
+    res.status(500).send({
+      result: "fail",
+      message: "Internal Server Error during login verification",
+    });
+  }
+});
+
 //api for logout
 app.post("/logout", async (req, res) => {
   try {
