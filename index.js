@@ -9,7 +9,7 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const Razorpay = require("razorpay");
 const path = require("path");
-const { validationResult } = require("express-validator");
+const { isoUint8Array } = require('@simplewebauthn/server/helpers');
 const {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -665,33 +665,33 @@ app.post("/create-user", async (req, res) => {
   try {
     const { name, username, phone, email, password } = req.body;
 
-    if(!name || !username || !phone || !email || !password){
+    if (!name || !username || !phone || !email || !password) {
       return res.status(400).json({
         success: false,
         message: "All fields are required"
       });
     }
 
-    const existingUser = await User.findOne({username});
+    const existingUser = await User.findOne({ username });
 
-    if(existingUser){
+    if (existingUser) {
       return res.status(409).json({
         success: false,
-        message:" User already exists"
+        message: " User already exists"
       });
     };
 
-    const hashedPassword = await bcrypt.hash(password,12)
+    const hashedPassword = await bcrypt.hash(password, 12)
 
     const newUser = await new User({
-      name, username, phone, email, password:hashedPassword
+      name, username, phone, email, password: hashedPassword
     });
 
     const result = await newUser.save();
 
     return res.status(201).json({
-      status:true,
-      message:"User successfully created",
+      status: true,
+      message: "User successfully created",
       data: result
     })
 
@@ -879,8 +879,7 @@ app.post("/register-webauthn/start", async (req, res) => {
         .send({ result: "fail", message: "User not found" });
     }
 
-    const userIDBuffer = crypto.randomBytes(16);
-    const userIDUint8Array = new Uint8Array(userIDBuffer);
+    const userIDUint8Array = isoUint8Array.fromUTF8String(user._id.toString());
 
     console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
 
@@ -902,14 +901,43 @@ app.post("/register-webauthn/start", async (req, res) => {
         transports: ['usb', 'ble', 'nfc', 'internal']
       })),
       supportedAlgorithmIDs: [-7, -257],
+
     });
 
-    console.log("Generated options:", options);
 
+    // Automatically generated challenge (from WebAuthN system)
+    const challenge = options.challenge;
+
+    // Store the challenge in binary format to keep things consistent
+    const challengeBinary = Uint8Array.from(challenge, c => c.charCodeAt(0));
+
+    // Store challenge in session in binary format for later use
     req.session.challenge = {
-      value: options.challenge,
+      value: challengeBinary,
       expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
     };
+
+    console.log("Challenge in binary (before sending to frontend):", challengeBinary);
+
+    // console.log("Generated options:", options.challenge);
+
+    // let challengeBinary;
+    // if (typeof options.challenge === "string") {
+    //   // Decode if it's base64 string
+    //   challengeBinary = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
+    // } else {
+    //   challengeBinary = options.challenge;  // If already binary
+    // }
+
+    // console.log("Backend generated Challenge binary", challengeBinary);
+
+    // // Replace the challenge with its binary format before sending the response
+    // options.challenge = challengeBinary;
+
+    // req.session.challenge = {
+    //   value: options.challenge,
+    //   expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
+    // };
     await req.session.save();
     return res.send(options);
   } catch (error) {
