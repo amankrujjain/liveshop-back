@@ -867,26 +867,104 @@ app.post("/login", async (req, res) => {
 //Register user
 
 // WebAuthn Registration Start
+// app.post("/register-webauthn/start", async (req, res) => {
+//   try {
+//     console.log("Requestbody in webauthN", req.body);
+//     const { username } = req.body;
+//     const user = await User.findOne({ username });
+
+//     if (!user) {
+//       return res
+//         .status(404)
+//         .send({ result: "fail", message: "User not found" });
+//     }
+
+//     const userIDUint8Array = isoUint8Array.fromUTF8String(user._id.toString());
+
+//     console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
+
+
+//     const RPID = process.env.NODE_ENV === 'production'
+//       ? 'liveshop-back.onrender.com'  // Render backend for production (without https://)
+//       : 'localhost';
+
+//     const options = await generateRegistrationOptions({
+//       rpName: "LiveShop",
+//       rpID: RPID,
+//       userID: userIDUint8Array,
+//       userName: username,
+//       attestationType: "none",
+//       allowCredentials: [],
+//       excludeCredentials: user.webAuthnCredentials.map(cred => ({
+//         id: cred.id,
+//         type: 'public-key',
+//         transports: ['usb', 'ble', 'nfc', 'internal']
+//       })),
+//       supportedAlgorithmIDs: [-7, -257],
+
+//     });
+
+
+//     // Automatically generated challenge (from WebAuthN system)
+//     const challenge = options.challenge;
+
+//     // Store the challenge in binary format to keep things consistent
+//     const challengeBinary = Uint8Array.from(challenge, c => c.charCodeAt(0));
+
+//     // Store challenge in session in binary format for later use
+//     req.session.challenge = {
+//       value: challengeBinary,
+//       expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
+//     };
+
+//     console.log("Challenge in binary (before sending to frontend):", challengeBinary);
+
+//     // console.log("Generated options:", options.challenge);
+
+//     // let challengeBinary;
+//     // if (typeof options.challenge === "string") {
+//     //   // Decode if it's base64 string
+//     //   challengeBinary = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
+//     // } else {
+//     //   challengeBinary = options.challenge;  // If already binary
+//     // }
+
+//     // console.log("Backend generated Challenge binary", challengeBinary);
+
+//     // // Replace the challenge with its binary format before sending the response
+//     // options.challenge = challengeBinary;
+
+//     // req.session.challenge = {
+//     //   value: options.challenge,
+//     //   expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
+//     // };
+//     await req.session.save();
+//     return res.send(options);
+//   } catch (error) {
+//     console.error("Error during WebAuthN registration start:", error.message);
+//     res.status(500).send({
+//       result: "fail",
+//       message: "Internal Server Error during registration start",
+//     });
+//   }
+// });
+
 app.post("/register-webauthn/start", async (req, res) => {
   try {
-    console.log("Requestbody in webauthN", req.body);
     const { username } = req.body;
     const user = await User.findOne({ username });
 
     if (!user) {
-      return res
-        .status(404)
-        .send({ result: "fail", message: "User not found" });
+      return res.status(404).send({ result: "fail", message: "User not found" });
     }
 
     const userIDUint8Array = isoUint8Array.fromUTF8String(user._id.toString());
 
     console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
 
-
-    const RPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-back.onrender.com'  // Render backend for production (without https://)
-      : 'localhost';
+    // Dynamically setting RPID based on the request origin
+    const origin = req.headers.origin; 
+    const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : new URL(origin).hostname;
 
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
@@ -901,51 +979,19 @@ app.post("/register-webauthn/start", async (req, res) => {
         transports: ['usb', 'ble', 'nfc', 'internal']
       })),
       supportedAlgorithmIDs: [-7, -257],
-
     });
 
-
-    // Automatically generated challenge (from WebAuthN system)
-    const challenge = options.challenge;
-
-    // Store the challenge in binary format to keep things consistent
-    const challengeBinary = Uint8Array.from(challenge, c => c.charCodeAt(0));
-
-    // Store challenge in session in binary format for later use
+    const challengeBinary = Uint8Array.from(options.challenge, c => c.charCodeAt(0));
     req.session.challenge = {
       value: challengeBinary,
       expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
     };
 
-    console.log("Challenge in binary (before sending to frontend):", challengeBinary);
-
-    // console.log("Generated options:", options.challenge);
-
-    // let challengeBinary;
-    // if (typeof options.challenge === "string") {
-    //   // Decode if it's base64 string
-    //   challengeBinary = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
-    // } else {
-    //   challengeBinary = options.challenge;  // If already binary
-    // }
-
-    // console.log("Backend generated Challenge binary", challengeBinary);
-
-    // // Replace the challenge with its binary format before sending the response
-    // options.challenge = challengeBinary;
-
-    // req.session.challenge = {
-    //   value: options.challenge,
-    //   expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
-    // };
     await req.session.save();
     return res.send(options);
   } catch (error) {
     console.error("Error during WebAuthN registration start:", error.message);
-    res.status(500).send({
-      result: "fail",
-      message: "Internal Server Error during registration start",
-    });
+    res.status(500).send({ result: "fail", message: "Internal Server Error during registration start" });
   }
 });
 
