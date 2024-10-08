@@ -72,16 +72,17 @@ app.use(
   session({
     secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
     resave: false, // Prevent session resave if nothing changes.
-    saveUninitialized: true, // Set to true to save empty sessions during testing.
+    saveUninitialized: false, // Set to true to save empty sessions during testing.
     store: MongoStore.create({
       mongoUrl: process.env.MONGODB_URL, // Use your testing MongoDB instance.
       collectionName: "sessions", // The sessions will be stored in the 'sessions' collection.
       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
     }),
     cookie: {
-      secure: isProduction || false, // Not secure, as you're likely testing without HTTPS.
-      httpOnly: true, // This will ensure cookies are not accessible via client-side JS.
-      maxAge: 1000 * 60 * 15, // 15-minute expiration for testing purposes.
+      secure: isProduction, // Secure should be true only in production with HTTPS.
+      httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
+      maxAge: 1000 * 60 * 15, // 15-minute expiration.
+      sameSite: isProduction ? 'None' : 'Lax', // 'None' for cross-site cookies in production, 'Lax' for development.
     },
   })
 );
@@ -863,92 +864,6 @@ app.post("/login", async (req, res) => {
 });
 
 //WebAuth N API
-
-//Register user
-
-// WebAuthn Registration Start
-// app.post("/register-webauthn/start", async (req, res) => {
-//   try {
-//     console.log("Requestbody in webauthN", req.body);
-//     const { username } = req.body;
-//     const user = await User.findOne({ username });
-
-//     if (!user) {
-//       return res
-//         .status(404)
-//         .send({ result: "fail", message: "User not found" });
-//     }
-
-//     const userIDUint8Array = isoUint8Array.fromUTF8String(user._id.toString());
-
-//     console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
-
-
-//     const RPID = process.env.NODE_ENV === 'production'
-//       ? 'liveshop-back.onrender.com'  // Render backend for production (without https://)
-//       : 'localhost';
-
-//     const options = await generateRegistrationOptions({
-//       rpName: "LiveShop",
-//       rpID: RPID,
-//       userID: userIDUint8Array,
-//       userName: username,
-//       attestationType: "none",
-//       allowCredentials: [],
-//       excludeCredentials: user.webAuthnCredentials.map(cred => ({
-//         id: cred.id,
-//         type: 'public-key',
-//         transports: ['usb', 'ble', 'nfc', 'internal']
-//       })),
-//       supportedAlgorithmIDs: [-7, -257],
-
-//     });
-
-
-//     // Automatically generated challenge (from WebAuthN system)
-//     const challenge = options.challenge;
-
-//     // Store the challenge in binary format to keep things consistent
-//     const challengeBinary = Uint8Array.from(challenge, c => c.charCodeAt(0));
-
-//     // Store challenge in session in binary format for later use
-//     req.session.challenge = {
-//       value: challengeBinary,
-//       expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
-//     };
-
-//     console.log("Challenge in binary (before sending to frontend):", challengeBinary);
-
-//     // console.log("Generated options:", options.challenge);
-
-//     // let challengeBinary;
-//     // if (typeof options.challenge === "string") {
-//     //   // Decode if it's base64 string
-//     //   challengeBinary = Uint8Array.from(atob(options.challenge), c => c.charCodeAt(0));
-//     // } else {
-//     //   challengeBinary = options.challenge;  // If already binary
-//     // }
-
-//     // console.log("Backend generated Challenge binary", challengeBinary);
-
-//     // // Replace the challenge with its binary format before sending the response
-//     // options.challenge = challengeBinary;
-
-//     // req.session.challenge = {
-//     //   value: options.challenge,
-//     //   expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
-//     // };
-//     await req.session.save();
-//     return res.send(options);
-//   } catch (error) {
-//     console.error("Error during WebAuthN registration start:", error.message);
-//     res.status(500).send({
-//       result: "fail",
-//       message: "Internal Server Error during registration start",
-//     });
-//   }
-// });
-
 app.post("/register-webauthn/start", async (req, res) => {
   try {
     const { username } = req.body;
@@ -958,13 +873,15 @@ app.post("/register-webauthn/start", async (req, res) => {
       return res.status(404).send({ result: "fail", message: "User not found" });
     }
 
+    // Convert userID to Uint8Array
     const userIDUint8Array = isoUint8Array.fromUTF8String(user._id.toString());
 
-    console.log("Unit 8 Arry converted bufferID", userIDUint8Array);
+    // Log the type and value of user ID
+    console.log("User ID Uint8Array:", userIDUint8Array);
+    console.log("User ID Type:", typeof userIDUint8Array, Array.isArray(userIDUint8Array));
 
-    // Dynamically setting RPID based on the request origin
-    const origin = req.headers.origin; 
-    const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : new URL(origin).hostname;
+    const origin = req.headers.origin;
+    const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : 'localhost';
 
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
@@ -981,13 +898,39 @@ app.post("/register-webauthn/start", async (req, res) => {
       supportedAlgorithmIDs: [-7, -257],
     });
 
-    const challengeBinary = Uint8Array.from(options.challenge, c => c.charCodeAt(0));
+    console.log('options data structure',options)
+
+    // Log the challenge to see what format it is in
+    console.log("Generated Challenge (before conversion):", options.challenge);
+    console.log("Generated Challenge Type (before conversion):", typeof options.challenge);
+
+    // Convert challenge to binary if necessary
+    let challengeBinary;
+    if (typeof options.challenge === "string") {
+      challengeBinary = Uint8Array.from(options.challenge, c => c.charCodeAt(0));
+      console.log("Converted Challenge to Uint8Array:", challengeBinary);
+    } else {
+      challengeBinary = options.challenge; // Already Uint8Array
+    }
+
     req.session.challenge = {
       value: challengeBinary,
-      expires: Date.now() + 5 * 60 * 1000, // Challenge valid for 5 minutes
+      expires: Date.now() + 5 * 60 * 1000, // 5-minute expiry
     };
 
-    await req.session.save();
+    // Log the session details
+    console.log("Session Challenge Stored:", req.session.challenge);
+    console.log("Session ID:", req.sessionID);
+
+    // Save the session
+    await req.session.save((err) => {
+      if (err) {
+        console.error("Error saving session:", err);
+      } else {
+        console.log("Session saved successfully.");
+      }
+    });
+
     return res.send(options);
   } catch (error) {
     console.error("Error during WebAuthN registration start:", error.message);
@@ -999,24 +942,57 @@ app.post("/register-webauthn/start", async (req, res) => {
 app.post("/register-webauthn/verify", async (req, res) => {
   try {
     const { username, attestationResponse } = req.body;
-    const user = await User.findOne({ username });
 
-    if (!user) {
-      return res
-        .status(404)
-        .send({ result: "Fail", message: "User not found" });
+    // Check if attestationResponse has necessary parts
+    console.log("Attestation response received:", JSON.stringify(attestationResponse, null, 2));
+
+    // Validate session existence and challenge in session
+    if (!req.session || !req.session.challenge) {
+      console.error("Data mismatch error: Challenge missing in session");
+      return res.status(400).send({ result: "fail", message: "Challenge missing in session" });
     }
 
-    const expectedChallenge = req.session.challenge;
+    // Log session data
+    console.log("Session ID in verification process:", req.sessionID);
+    console.log("Session data in verification process:", req.session);
+
+    // Log important values from session and attestation response
+    const expectedChallenge = req.session.challenge.value;
+    console.log("Expected Challenge:", expectedChallenge);
 
     const expectedOrigin = process.env.NODE_ENV === "production"
-      ? "https://liveshop-front.vercel.app" // Vercel frontend for production
-      : "http://localhost:3000"; // Local frontend for development
+      ? "https://liveshop-front.vercel.app"
+      : "http://localhost:3000";
 
     const expectedRPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-back.onrender.com'  // Backend domain for production
+      ? 'liveshop-back.onrender.com'
       : 'localhost';
 
+    console.log("Expected Origin:", expectedOrigin);
+    console.log("Expected RPID:", expectedRPID);
+
+    // Find user and check existence
+    const user = await User.findOne({ username });
+    if (!user) {
+      console.error("Data mismatch error: User not found.");
+      return res.status(404).send({ result: "Fail", message: "User not found" });
+    }
+
+    console.log("Attestation response object received:", attestationResponse);
+
+    // Validate the response object inside attestation response
+    if (!attestationResponse.response) {
+      console.error("Data mismatch error: 'response' object is missing in attestation response.");
+      return res.status(400).send({ result: "fail", message: "Response is missing in attestation." });
+    }
+
+    // Check if the challenge matches
+    if (attestationResponse.response.clientDataJSON !== expectedChallenge) {
+      console.error("Data mismatch error: Challenge in attestationResponse does not match expected challenge.");
+      return res.status(400).send({ result: "fail", message: "Challenge mismatch in attestation response." });
+    }
+
+    // Proceed with the verification process
     const { verified, registrationInfo } = await verifyRegistrationResponse({
       credential: attestationResponse,
       expectedChallenge: expectedChallenge,
@@ -1025,6 +1001,18 @@ app.post("/register-webauthn/verify", async (req, res) => {
       supportedAlgorithmIDs: [-7, -257],
     });
 
+    // Log verification result
+    console.log("Verification Result:", verified);
+    if (registrationInfo) {
+      console.log("Registration Info:", registrationInfo);
+      console.log("Credential ID:", registrationInfo.credentialID);
+      console.log("Public Key:", registrationInfo.credentialPublicKey);
+      console.log("Counter:", registrationInfo.counter);
+    } else {
+      console.log("No registration info found.");
+    }
+
+    // Handle the result of the verification
     if (verified) {
       user.webAuthnCredentials.push({
         id: registrationInfo.credentialID,
@@ -1035,21 +1023,26 @@ app.post("/register-webauthn/verify", async (req, res) => {
 
       res.send({ result: "Done", message: "WebAuthn credentials registered" });
     } else {
-      return res
-        .status(400)
-        .send({ result: "fail", message: "WebAuthn registration failed" });
+      console.log("WebAuthn registration failed.");
+      return res.status(400).send({ result: "fail", message: "WebAuthn registration failed" });
     }
+
   } catch (error) {
-    console.error(
-      "Error during WebAuthN registration verification:",
-      error.message
-    );
+    // Add specific error handling for mismatch cases
+    console.error("Error during WebAuthN registration verification:", error.message);
+    if (error.message.includes("Data mismatch error")) {
+      return res.status(400).send({ result: "fail", message: error.message });
+    }
+    
     res.status(500).send({
       result: "fail",
       message: "Internal Server Error during registration verification",
     });
   }
 });
+
+
+
 
 // WebAuthn Login Start
 app.post("/webauthn/login", async (req, res) => {
