@@ -9,7 +9,7 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const Razorpay = require("razorpay");
 const path = require("path");
-const { isoUint8Array } = require('@simplewebauthn/server/helpers');
+const { isoUint8Array, isoBase64URL } = require('@simplewebauthn/server/helpers');
 const {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -864,6 +864,7 @@ app.post("/login", async (req, res) => {
 });
 
 //WebAuth N API
+
 app.post("/register-webauthn/start", async (req, res) => {
   try {
     const { username } = req.body;
@@ -873,52 +874,38 @@ app.post("/register-webauthn/start", async (req, res) => {
       return res.status(404).send({ result: "fail", message: "User not found" });
     }
 
-    // Convert userID to Uint8Array
-    const userIDUint8Array = isoUint8Array.fromUTF8String(user._id.toString());
-
-    // Log the type and value of user ID
-    console.log("User ID Uint8Array:", userIDUint8Array);
-    console.log("User ID Type:", typeof userIDUint8Array, Array.isArray(userIDUint8Array));
+    // Convert user id into base64URL format for WebAuthn support
+    const userID = isoUint8Array.fromUTF8String(user._id.toString());
 
     const origin = req.headers.origin;
     const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : 'localhost';
 
+    // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
       rpID: RPID,
-      userID: userIDUint8Array,
+      userID: userID,
       userName: username,
       attestationType: "none",
       allowCredentials: [],
+      challenge: "thisiswebauthnchallenge", // Automatically handled as base64URL by WebAuthn package
       excludeCredentials: user.webAuthnCredentials.map(cred => ({
-        id: cred.id,
+        id: isoBase64URL.fromBuffer(cred.id), // Convert credential ID to base64URL format
         type: 'public-key',
         transports: ['usb', 'ble', 'nfc', 'internal']
       })),
       supportedAlgorithmIDs: [-7, -257],
     });
 
-    console.log('options data structure',options)
+    console.log("Generated Registration Options:", options);
 
-    // Log the challenge to see what format it is in
-    console.log("Generated Challenge (before conversion):", options.challenge);
-    console.log("Generated Challenge Type (before conversion):", typeof options.challenge);
-
-    // Convert challenge to binary if necessary
-    let challengeBinary;
-    if (typeof options.challenge === "string") {
-      challengeBinary = Uint8Array.from(options.challenge, c => c.charCodeAt(0));
-      console.log("Converted Challenge to Uint8Array:", challengeBinary);
-    } else {
-      challengeBinary = options.challenge; // Already Uint8Array
-    }
-
+    // Save the challenge and userID in the session with expiry
     req.session.challenge = {
-      value: challengeBinary,
+      value: options.challenge,
       expires: Date.now() + 5 * 60 * 1000, // 5-minute expiry
     };
 
-    // Log the session details
+    // Log session details for debugging
     console.log("Session Challenge Stored:", req.session.challenge);
     console.log("Session ID:", req.sessionID);
 
@@ -931,6 +918,7 @@ app.post("/register-webauthn/start", async (req, res) => {
       }
     });
 
+    // Send the options object as the response
     return res.send(options);
   } catch (error) {
     console.error("Error during WebAuthN registration start:", error.message);
@@ -938,111 +926,67 @@ app.post("/register-webauthn/start", async (req, res) => {
   }
 });
 
-// WebAuthn Registration Verification
 app.post("/register-webauthn/verify", async (req, res) => {
   try {
-    const { username, attestationResponse } = req.body;
+      const { username, attestationResponse } = req.body;
 
-    // Check if attestationResponse has necessary parts
-    console.log("Attestation response received:", JSON.stringify(attestationResponse, null, 2));
+      // Validate session existence and challenge in session
+      if (!req.session || !req.session.challenge) {
+          return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
+      }
 
-    // Validate session existence and challenge in session
-    if (!req.session || !req.session.challenge) {
-      console.error("Data mismatch error: Challenge missing in session");
-      return res.status(400).send({ result: "fail", message: "Challenge missing in session" });
-    }
+      console.log("Inside WebAuthN verification:", attestationResponse);
 
-    // Log session data
-    console.log("Session ID in verification process:", req.sessionID);
-    console.log("Session data in verification process:", req.session);
+      const expectedChallenge = req.session.challenge.value;
+      const expectedOrigin = process.env.NODE_ENV === "production" 
+          ? "https://liveshop-front.vercel.app"
+          : "http://localhost:3000";
+      const expectedRPID = process.env.NODE_ENV === 'production'
+          ? 'liveshop-back.onrender.com'
+          : 'localhost';
 
-    // Log important values from session and attestation response
-    const expectedChallenge = req.session.challenge.value;
-    console.log("Expected Challenge:", expectedChallenge);
-
-    const expectedOrigin = process.env.NODE_ENV === "production"
-      ? "https://liveshop-front.vercel.app"
-      : "http://localhost:3000";
-
-    const expectedRPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-back.onrender.com'
-      : 'localhost';
-
-    console.log("Expected Origin:", expectedOrigin);
-    console.log("Expected RPID:", expectedRPID);
-
-    // Find user and check existence
-    const user = await User.findOne({ username });
-    if (!user) {
-      console.error("Data mismatch error: User not found.");
-      return res.status(404).send({ result: "Fail", message: "User not found" });
-    }
-
-    console.log("Attestation response object received:", attestationResponse);
-
-    // Validate the response object inside attestation response
-    if (!attestationResponse.response) {
-      console.error("Data mismatch error: 'response' object is missing in attestation response.");
-      return res.status(400).send({ result: "fail", message: "Response is missing in attestation." });
-    }
-
-    // Check if the challenge matches
-    if (attestationResponse.response.clientDataJSON !== expectedChallenge) {
-      console.error("Data mismatch error: Challenge in attestationResponse does not match expected challenge.");
-      return res.status(400).send({ result: "fail", message: "Challenge mismatch in attestation response." });
-    }
-
-    // Proceed with the verification process
-    const { verified, registrationInfo } = await verifyRegistrationResponse({
-      credential: attestationResponse,
-      expectedChallenge: expectedChallenge,
-      expectedOrigin: expectedOrigin,
-      expectedRPID: expectedRPID,
-      supportedAlgorithmIDs: [-7, -257],
-    });
-
-    // Log verification result
-    console.log("Verification Result:", verified);
-    if (registrationInfo) {
-      console.log("Registration Info:", registrationInfo);
-      console.log("Credential ID:", registrationInfo.credentialID);
-      console.log("Public Key:", registrationInfo.credentialPublicKey);
-      console.log("Counter:", registrationInfo.counter);
-    } else {
-      console.log("No registration info found.");
-    }
-
-    // Handle the result of the verification
-    if (verified) {
-      user.webAuthnCredentials.push({
-        id: registrationInfo.credentialID,
-        publicKey: registrationInfo.credentialPublicKey,
-        counter: registrationInfo.counter,
+      // Proceed with WebAuthn verification process
+      const { verified, registrationInfo } = await verifyRegistrationResponse({
+          response: attestationResponse,
+          expectedChallenge: expectedChallenge,
+          expectedOrigin: expectedOrigin,
+          expectedRPID: expectedRPID,
+          supportedAlgorithmIDs: [-7, -257],  // Algorithm support
       });
-      await user.save();
 
-      res.send({ result: "Done", message: "WebAuthn credentials registered" });
-    } else {
-      console.log("WebAuthn registration failed.");
-      return res.status(400).send({ result: "fail", message: "WebAuthn registration failed" });
-    }
+      if (verified && registrationInfo) {
+          // Save credentials in user model
+          const user = await User.findOne({ username });
+
+          // Ensure credentialID is present in registrationInfo
+          const { credentialID, credentialPublicKey, counter } = registrationInfo;
+
+          if (!credentialID) {
+              throw new Error("Missing credentialID in registrationInfo");
+          }
+
+          // Push new credentials to the user's WebAuthn credentials
+          user.webAuthnCredentials.push({
+              credentialId: credentialID,  // This is the field causing the issue
+              publicKey: credentialPublicKey,
+              counter: counter,
+              deviceType: registrationInfo.credentialDeviceType,
+              backedUp: registrationInfo.credentialBackedUp,
+              transports: attestationResponse.transports || [],  // Handle transports if applicable
+          });
+
+          await user.save();
+
+          res.send({ result: "Done", message: "WebAuthn credentials registered successfully" });
+      } else {
+          return res.status(400).send({ result: "fail", message: "WebAuthn registration verification failed." });
+      }
 
   } catch (error) {
-    // Add specific error handling for mismatch cases
-    console.error("Error during WebAuthN registration verification:", error.message);
-    if (error.message.includes("Data mismatch error")) {
-      return res.status(400).send({ result: "fail", message: error.message });
-    }
-    
-    res.status(500).send({
-      result: "fail",
-      message: "Internal Server Error during registration verification",
-    });
+      console.error("Error during WebAuthN registration verification:", error);
+      return res.status(500).send({ result: "fail", message: "Internal Server Error during verification." });
   }
 });
-
-
-
 
 // WebAuthn Login Start
 app.post("/webauthn/login", async (req, res) => {
