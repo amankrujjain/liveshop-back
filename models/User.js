@@ -10,7 +10,7 @@ const WebAuthnCredentialSchema = new mongoose.Schema({
         required: true,
     },
     signCount:{
-        type: String,
+        type: Number,
         required: true,
         default: 0,
     },

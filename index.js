@@ -14,6 +14,7 @@ const {
   generateRegistrationOptions,
   verifyRegistrationResponse,
   generateAuthenticationOptions,
+  verifyAuthenticationResponse
 } = require("@simplewebauthn/server");
 
 require("dotenv").config();
@@ -21,6 +22,7 @@ require("dotenv").config();
 const session = require("express-session");
 const MongoStore = require("connect-mongo");
 const crypto = require("crypto");
+const generateSecretKey = require('./helpers/generateSecretKey')
 
 const Maincategory = require("./models/Maincategory");
 const Subcategory = require("./models/Subcategory");
@@ -822,16 +824,7 @@ app.post("/login", async (req, res) => {
         .send({ result: "Fail", message: "Invalid Username or Password" });
     }
 
-    // Create a plain object from the Mongoose document
-    const userObj = user.toObject();
-    delete userObj.tokens; // Remove tokens before signing
-
-    let secretKey;
-    if (user.role === "Admin") {
-      secretKey = process.env.ADMINSAULTKEY;
-    } else {
-      secretKey = process.env.USERSAULTKEY;
-    }
+    const secretKey = generateSecretKey(user.role)
 
     // Check if the secret key exists
     if (!secretKey) {
@@ -841,7 +834,7 @@ app.post("/login", async (req, res) => {
     }
 
     // Sign JWT token
-    const token = jwt.sign({ user: userObj }, secretKey);
+    const token = jwt.sign({ id: user._id}, secretKey);
 
     // Check if the tokens array length is less than 3 (optional logic)
     if (user.tokens.length < 3) {
@@ -883,16 +876,21 @@ app.post("/register-webauthn/start", async (req, res) => {
     // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
-      rpID: RPID,
+      rpID: 'localhost',
       userID: userID,
       userName: username,
       attestationType: "none",
       allowCredentials: [],
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',  // Use platform authenticator (e.g., Face ID, Touch ID)
+        userVerification: 'preferred',  // Allow biometric authentication
+        residentKey: 'required',
+      },
       challenge: "thisiswebauthnchallenge", // Automatically handled as base64URL by WebAuthn package
       excludeCredentials: user.webAuthnCredentials.map(cred => ({
-        id: isoBase64URL.fromBuffer(cred.id), // Convert credential ID to base64URL format
+        id: cred.credentialId,
         type: 'public-key',
-        transports: ['usb', 'ble', 'nfc', 'internal']
+        transports: ['internal']
       })),
       supportedAlgorithmIDs: [-7, -257],
     });
@@ -928,63 +926,70 @@ app.post("/register-webauthn/start", async (req, res) => {
 
 app.post("/register-webauthn/verify", async (req, res) => {
   try {
-      const { username, attestationResponse } = req.body;
+    const { username, attestationResponse } = req.body;
 
-      // Validate session existence and challenge in session
-      if (!req.session || !req.session.challenge) {
-          return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
-      }
+    // Validate session existence and challenge in session
+    if (!req.session || !req.session.challenge) {
+      return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
+    }
 
-      console.log("Inside WebAuthN verification:", attestationResponse);
+    console.log("Inside WebAuthN verification:", attestationResponse);
 
-      const expectedChallenge = req.session.challenge.value;
-      const expectedOrigin = process.env.NODE_ENV === "production" 
-          ? "https://liveshop-front.vercel.app"
-          : "http://localhost:3000";
-      const expectedRPID = process.env.NODE_ENV === 'production'
-          ? 'liveshop-back.onrender.com'
-          : 'localhost';
+    const expectedChallenge = req.session.challenge.value;
+    const expectedOrigin = process.env.NODE_ENV === "production"
+      ? "https://liveshop-front.vercel.app"
+      : "http://localhost:3000";
+    const expectedRPID = process.env.NODE_ENV === 'production'
+      ? 'liveshop-back.onrender.com'
+      : 'localhost';
 
-      // Proceed with WebAuthn verification process
-      const { verified, registrationInfo } = await verifyRegistrationResponse({
-          response: attestationResponse,
-          expectedChallenge: expectedChallenge,
-          expectedOrigin: expectedOrigin,
-          expectedRPID: expectedRPID,
-          supportedAlgorithmIDs: [-7, -257],  // Algorithm support
+    console.log("Inside the verify register", expectedRPID)
+
+    // Proceed with WebAuthn verification process
+    const { verified, registrationInfo } = await verifyRegistrationResponse({
+      response: attestationResponse,
+      expectedChallenge: expectedChallenge,
+      expectedOrigin: expectedOrigin,
+      expectedRPID: 'localhost',
+      supportedAlgorithmIDs: [-7, -257],  // Algorithm support
+      requireUserVerification: false
+    });
+
+    console.log("reg info inside reg verify", registrationInfo.rpID)
+
+    if (verified && registrationInfo) {
+      // Save credentials in user model
+      const user = await User.findOne({ username });
+
+      // Ensure credentialID is present in registrationInfo
+      const { credentialID, credentialPublicKey, counter } = registrationInfo;
+
+      if (!credentialID) {
+        throw new Error("Missing credentialID in registrationInfo");
+      };
+
+      console.log("CredentialID during reg", credentialID)
+
+      // Push new credentials to the user's WebAuthn credentials
+      user.webAuthnCredentials.push({
+        credentialId: registrationInfo.credentialID, // This should be the credential ID from WebAuthn
+        publicKey: isoBase64URL.fromBuffer(registrationInfo.credentialPublicKey),
+        signCount: registrationInfo.counter,
+        deviceType: registrationInfo.credentialDeviceType,
+        backedUp: registrationInfo.credentialBackedUp,
+        transports: attestationResponse.transports || [],  // Handle transports if applicable
       });
 
-      if (verified && registrationInfo) {
-          // Save credentials in user model
-          const user = await User.findOne({ username });
+      await user.save();
 
-          // Ensure credentialID is present in registrationInfo
-          const { credentialID, credentialPublicKey, counter } = registrationInfo;
-
-          if (!credentialID) {
-              throw new Error("Missing credentialID in registrationInfo");
-          }
-
-          // Push new credentials to the user's WebAuthn credentials
-          user.webAuthnCredentials.push({
-              credentialId: credentialID,  // This is the field causing the issue
-              publicKey: credentialPublicKey,
-              counter: counter,
-              deviceType: registrationInfo.credentialDeviceType,
-              backedUp: registrationInfo.credentialBackedUp,
-              transports: attestationResponse.transports || [],  // Handle transports if applicable
-          });
-
-          await user.save();
-
-          res.send({ result: "Done", message: "WebAuthn credentials registered successfully" });
-      } else {
-          return res.status(400).send({ result: "fail", message: "WebAuthn registration verification failed." });
-      }
+      res.send({ result: "Done", message: "WebAuthn credentials registered successfully" });
+    } else {
+      return res.status(400).send({ result: "fail", message: "WebAuthn registration verification failed." });
+    }
 
   } catch (error) {
-      console.error("Error during WebAuthN registration verification:", error);
-      return res.status(500).send({ result: "fail", message: "Internal Server Error during verification." });
+    console.error("Error during WebAuthN registration verification:", error);
+    return res.status(500).send({ result: "fail", message: "Internal Server Error during verification." });
   }
 });
 
@@ -999,6 +1004,7 @@ app.post("/webauthn/login", async (req, res) => {
         .status(404)
         .send({ result: "Fail", message: "User not found" });
     }
+    console.log("Stored Credential ID:", user.webAuthnCredentials);
 
     // Check if the user has any WebAuthn credentials
     if (!user.webAuthnCredentials || user.webAuthnCredentials.length === 0) {
@@ -1009,13 +1015,21 @@ app.post("/webauthn/login", async (req, res) => {
     }
 
     const options = await generateAuthenticationOptions({
+      rpID: 'localhost',
       allowCredentials: user.webAuthnCredentials.map((cred) => ({
-        id: cred.id,
+        id: cred.credentialId,
         type: "public-key",
-        transports: ["usb", "ble", "nfc", "internal"],
+        transports: ["internal"],
       })),
       userVerification: "preferred",
     });
+
+    console.log("Transports during login:", options.allowCredentials[0].transports);
+
+    // Log the credential ID for debugging
+    console.log("Credential ID during login:", options.allowCredentials[0].id);
+
+    console.log("Options of login", options)
 
     req.session.challenge = options.challenge;
     return res.send(options);
@@ -1028,68 +1042,82 @@ app.post("/webauthn/login", async (req, res) => {
   }
 });
 
-// WebAuthn Login Verification
 app.post("/login-webauthn/verify", async (req, res) => {
   try {
     const { username, authResponse } = req.body;
 
+    console.log("Auth response received:", authResponse);
+
+    // Find user in the database
     const user = await User.findOne({ username });
-
     if (!user) {
-      return res
-        .status(404)
-        .send({ result: "Fail", message: "User not found" });
+      return res.status(404).send({ result: "Fail", message: "User not found" });
     }
 
-    const expectedChallenge = req.session.challenge;
+    // Check if session contains challenge
+    const expectedChallenge = req.session?.challenge;
+    if (!expectedChallenge) {
+      return res.status(400).send({ result: "Fail", message: "Challenge missing or session expired" });
+    }
+
+    // Find user's WebAuthn credentials
     const credential = user.webAuthnCredentials.find(
-      (cred) => cred.id === authResponse.id
+      (cred) => cred.credentialId === authResponse.id
     );
-
     if (!credential) {
-      return res
-        .status(404)
-        .send({ result: "Fail", message: "Credentials not found" });
+      return res.status(404).send({ result: "Fail", message: "Credentials not found" });
     }
 
+    // Define expected origin and RPID based on environment
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
 
-    const expectedRPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-back.onrender.com'
-      : 'localhost';
+    const expectedRPID = 'localhost';
 
+    console.log("inside login verify", expectedRPID);
+
+    // Pass the authResponse directly for verification
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
-      credential: authResponse,
-      expectedChallenge: expectedChallenge,
-      expectedOrigin: expectedOrigin,
-      expectedRPID: expectedRPID,
+      response: authResponse,  // Pass the entire authResponse directly
+      expectedChallenge,
+      expectedOrigin,
+      expectedRPID,
       authenticator: {
         counter: credential.counter,
-        credentialPublicKey: credential.publicKey,
+        credentialPublicKey: isoBase64URL.toBuffer(credential.publicKey), // previously getting error as the public key needs to be decoded again to buffer
       },
+      requireUserVerification: false,
     });
 
+    console.log("Autheticationinfo", authenticationInfo);
+    console.log("Verified", verified);
+
     if (verified) {
+      // Update the counter in the database to prevent replay attacks
       credential.counter = authenticationInfo.newCounter;
       await user.save();
 
-      const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-      res.send({ result: "Done", token });
+      // Clear the challenge from session after verification
+      req.session.challenge = null;
+
+      const secretKey = generateSecretKey(user.role)
+
+      // Generate a JWT token upon successful login
+      const token = jwt.sign({ id: user._id }, secretKey);
+      console.log("Token --->", token)
+
+      // Send the token back to the client
+      res.send({ result: "Done", token:token, verified: verified, data:user }); // sending the response strucutre to frontend for it to read the token,user data, and verified
     } else {
-      res
-        .status(400)
-        .send({ result: "Fail", message: "Authentication failed" });
+      res.status(400).send({ result: "Fail", message: "Authentication failed" });
     }
   } catch (error) {
-    console.error("Error during WebAuthN login verification:", error.message);
-    res.status(500).send({
-      result: "fail",
-      message: "Internal Server Error during login verification",
-    });
+    console.error("Error during WebAuthN login verification:", error);
+    res.status(500).send({ result: "fail", message: "Internal Server Error during login verification" });
   }
 });
+
 
 //api for logout
 app.post("/logout", async (req, res) => {
