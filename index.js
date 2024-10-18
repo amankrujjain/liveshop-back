@@ -34,14 +34,12 @@ const Wishlist = require("./models/Wishlist");
 const Checkout = require("./models/Checkout");
 const Contact = require("./models/Contact");
 const Newslatter = require("./models/Newslatter");
-const isProduction = process.env.NODE_ENV === "production";
-const frontendUrl =
-  process.env.NODE_ENV === "production"
+const isProduction = process.env.NODE_ENV === "production"
     ? "https://liveshop-front.vercel.app" // Vercel frontend URL for production
     : "http://localhost:3000";
 
 const allowedOrigins = [
-  frontendUrl, // The correct URL for the frontend
+  "https://liveshop-front.vercel.app", // The correct URL for the frontend
   'http://localhost:3000', // Local development
 ];
 
@@ -80,7 +78,7 @@ app.use(
       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
     }),
     cookie: {
-      secure: true, // Secure should be true only in production with HTTPS.
+      secure: isProduction, // Secure should be true only in production with HTTPS.
       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
       maxAge: 1000 * 60 * 15, // 15-minute expiration.
       sameSite: 'None', // 'None' for cross-site cookies in production, 'Lax' for development.
