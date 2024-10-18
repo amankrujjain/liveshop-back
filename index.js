@@ -920,20 +920,28 @@ app.post("/register-webauthn/verify", async (req, res) => {
   try {
     const { username, attestationResponse } = req.body;
 
-    // Validate session existence and challenge in session
-    if (!req.session || !req.session.challenge) {
-      return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
+    // Check if session exists
+    if (!req.session) {
+      return res.status(400).send({ result: "fail", message: "Session not found. Please restart the registration process." });
     }
 
+    // Check if challenge is missing
+    if (!req.session.challenge) {
+      return res.status(400).send({ result: "fail", message: "Challenge missing in session." });
+    }
+
+    // Check if challenge is expired
+    if (Date.now() > req.session.challenge.expires) {
+      return res.status(400).send({ result: "fail", message: "Challenge has expired. Please try again." });
+    }
 
     const expectedChallenge = req.session.challenge.value;
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === 'production'
-    ? 'liveshop-front.vercel.app'  // Your frontend domain on Vercel or another host
-    : 'localhost';
-
+      ? 'liveshop-front.vercel.app'
+      : 'localhost';
 
     // Proceed with WebAuthn verification process
     const { verified, registrationInfo } = await verifyRegistrationResponse({
@@ -941,7 +949,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
       expectedChallenge: expectedChallenge,
       expectedOrigin: expectedOrigin,
       expectedRPID: expectedRPID,
-      supportedAlgorithmIDs: [-7, -257],  // Algorithm support
+      supportedAlgorithmIDs: [-7, -257],
       requireUserVerification: false
     });
 
@@ -954,16 +962,16 @@ app.post("/register-webauthn/verify", async (req, res) => {
 
       if (!credentialID) {
         throw new Error("Missing credentialID in registrationInfo");
-      };
+      }
 
       // Push new credentials to the user's WebAuthn credentials
       user.webAuthnCredentials.push({
-        credentialId: registrationInfo.credentialID, // This should be the credential ID from WebAuthn
+        credentialId: registrationInfo.credentialID, 
         publicKey: isoBase64URL.fromBuffer(registrationInfo.credentialPublicKey),
         signCount: registrationInfo.counter,
         deviceType: registrationInfo.credentialDeviceType,
         backedUp: registrationInfo.credentialBackedUp,
-        transports: attestationResponse.transports || [],  // Handle transports if applicable
+        transports: attestationResponse.transports || [],
       });
 
       await user.save();
