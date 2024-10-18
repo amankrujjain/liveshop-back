@@ -34,21 +34,28 @@ const Wishlist = require("./models/Wishlist");
 const Checkout = require("./models/Checkout");
 const Contact = require("./models/Contact");
 const Newslatter = require("./models/Newslatter");
-const isProduction =  process.env.NODE_ENV === "production"
+const isProduction = process.env.NODE_ENV === "production";
+const frontendUrl =
+  process.env.NODE_ENV === "production"
     ? "https://liveshop-front.vercel.app" // Vercel frontend URL for production
     : "http://localhost:3000";
 
 const allowedOrigins = [
-  "https://liveshop-front.vercel.app", // The correct URL for the frontend
+  frontendUrl, // The correct URL for the frontend
   'http://localhost:3000', // Local development
 ];
 
 require("./dbConnect");
 const app = express();
 
-
 const corsOptions = {
-  origin: ["https://liveshop-front.vercel.app",'http://localhost:3000'],
+  origin: (origin, callback) => {
+    if (allowedOrigins.includes(origin) || !origin) {
+      callback(null, true); // Allow requests from allowed origins or undefined origins (e.g., Postman)
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "username"],
   credentials: true, // Allow credentials like cookies and tokens
@@ -73,10 +80,10 @@ app.use(
       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
     }),
     cookie: {
-      secure: true, // Secure should be true only in production with HTTPS.
+      secure: isProduction, // Secure should be true only in production with HTTPS.
       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
       maxAge: 1000 * 60 * 15, // 15-minute expiration.
-      sameSite:'None', // 'None' for cross-site cookies in production, 'Lax' for development.
+      sameSite: isProduction ? 'None' : 'Lax', // 'None' for cross-site cookies in production, 'Lax' for development.
     },
   })
 );
@@ -858,14 +865,12 @@ app.post("/register-webauthn/start", async (req, res) => {
     const userID = isoUint8Array.fromUTF8String(user._id.toString());
 
     const origin = req.headers.origin;
-    const RPID = process.env.NODE_ENV === 'production'
-    ? 'liveshop-front.vercel.app'  // Your frontend domain on Vercel or another host
-    : 'localhost';
+    const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : 'localhost';
 
     // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
-      rpID: RPID,
+      rpID: 'localhost',
       userID: userID,
       userName: username,
       attestationType: "none",
@@ -890,8 +895,6 @@ app.post("/register-webauthn/start", async (req, res) => {
       expires: Date.now() + 5 * 60 * 1000, // 5-minute expiry
     };
 
-    console.log('session',req.session)
-
 
     // Save the session
     await req.session.save((err) => {
@@ -913,38 +916,29 @@ app.post("/register-webauthn/start", async (req, res) => {
 app.post("/register-webauthn/verify", async (req, res) => {
   try {
     const { username, attestationResponse } = req.body;
-    console.log("inside verify", req.session)
 
-    // Check if session exists
-    if (!req.session) {
-      return res.status(400).send({ result: "fail", message: "Session not found. Please restart the registration process." });
+    // Validate session existence and challenge in session
+    if (!req.session || !req.session.challenge) {
+      return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
     }
 
-    // Check if challenge is missing
-    if (!req.session.challenge) {
-      return res.status(400).send({ result: "fail", message: "Challenge missing in session." });
-    }
-
-    // Check if challenge is expired
-    if (Date.now() > req.session.challenge.expires) {
-      return res.status(400).send({ result: "fail", message: "Challenge has expired. Please try again." });
-    }
 
     const expectedChallenge = req.session.challenge.value;
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-front.vercel.app'
+      ? 'liveshop-back.onrender.com'
       : 'localhost';
+
 
     // Proceed with WebAuthn verification process
     const { verified, registrationInfo } = await verifyRegistrationResponse({
       response: attestationResponse,
       expectedChallenge: expectedChallenge,
       expectedOrigin: expectedOrigin,
-      expectedRPID: expectedRPID,
-      supportedAlgorithmIDs: [-7, -257],
+      expectedRPID: 'localhost',
+      supportedAlgorithmIDs: [-7, -257],  // Algorithm support
       requireUserVerification: false
     });
 
@@ -957,16 +951,16 @@ app.post("/register-webauthn/verify", async (req, res) => {
 
       if (!credentialID) {
         throw new Error("Missing credentialID in registrationInfo");
-      }
+      };
 
       // Push new credentials to the user's WebAuthn credentials
       user.webAuthnCredentials.push({
-        credentialId: registrationInfo.credentialID, 
+        credentialId: registrationInfo.credentialID, // This should be the credential ID from WebAuthn
         publicKey: isoBase64URL.fromBuffer(registrationInfo.credentialPublicKey),
         signCount: registrationInfo.counter,
         deviceType: registrationInfo.credentialDeviceType,
         backedUp: registrationInfo.credentialBackedUp,
-        transports: attestationResponse.transports || [],
+        transports: attestationResponse.transports || [],  // Handle transports if applicable
       });
 
       await user.save();
@@ -1000,14 +994,10 @@ app.post("/webauthn/login", async (req, res) => {
         result: "Fail",
         message: "No WebAuthn credentials found for this user",
       });
-    };
-
-    const RPID = process.env.NODE_ENV === 'production'
-    ? 'liveshop-back.onrender.com'  // Your exact Render backend URL
-    : 'localhost';
+    }
 
     const options = await generateAuthenticationOptions({
-      rpID: RPID,
+      rpID: 'localhost',
       allowCredentials: user.webAuthnCredentials.map((cred) => ({
         id: cred.credentialId,
         type: "public-key",
@@ -1057,9 +1047,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
-    const expectedRPID = process.env.NODE_ENV === 'production'
-    ? 'liveshop-front.vercel.app'  // Your frontend domain on Vercel or another host
-    : 'localhost';
+    const expectedRPID = 'localhost';
 
     // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
