@@ -919,6 +919,7 @@ app.post("/register-webauthn/start", async (req, res) => {
 app.post("/register-webauthn/verify", async (req, res) => {
   try {
     const { username, attestationResponse } = req.body;
+    console.log("inside verify", req.session)
 
     // Check if session exists
     if (!req.session) {
