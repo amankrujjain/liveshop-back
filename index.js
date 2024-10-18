@@ -865,7 +865,9 @@ app.post("/register-webauthn/start", async (req, res) => {
     const userID = isoUint8Array.fromUTF8String(user._id.toString());
 
     const origin = req.headers.origin;
-    const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : 'localhost';
+    const RPID = process.env.NODE_ENV === 'production'
+    ? 'liveshop-front.vercel.app'  // Your frontend domain on Vercel or another host
+    : 'localhost';
 
     // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
@@ -928,8 +930,8 @@ app.post("/register-webauthn/verify", async (req, res) => {
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-back.onrender.com'
-      : 'localhost';
+    ? 'liveshop-front.vercel.app'  // Your frontend domain on Vercel or another host
+    : 'localhost';
 
 
     // Proceed with WebAuthn verification process
@@ -1052,8 +1054,8 @@ app.post("/login-webauthn/verify", async (req, res) => {
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === 'production'
-    ? 'liveshop-back.onrender.com'  // Your exact Render backend URL
-    : 'localhost';;
+    ? 'liveshop-front.vercel.app'  // Your frontend domain on Vercel or another host
+    : 'localhost';
 
     // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
