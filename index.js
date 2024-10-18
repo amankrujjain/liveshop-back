@@ -79,10 +79,10 @@ app.use(
       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
     }),
     cookie: {
-      secure: isProduction, // Secure should be true only in production with HTTPS.
+      secure: true, // Secure should be true only in production with HTTPS.
       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
       maxAge: 1000 * 60 * 15, // 15-minute expiration.
-      sameSite: isProduction ? 'None' : 'Lax', // 'None' for cross-site cookies in production, 'Lax' for development.
+      sameSite:'None', // 'None' for cross-site cookies in production, 'Lax' for development.
     },
   })
 );
