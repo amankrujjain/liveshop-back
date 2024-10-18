@@ -48,13 +48,7 @@ const app = express();
 
 
 const corsOptions = {
-  origin: (origin, callback) => {
-    if (allowedOrigins.includes(origin) || !origin) {
-      callback(null, true); // Allow requests from allowed origins or undefined origins (e.g., Postman)
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: ["https://liveshop-front.vercel.app",'http://localhost:3000'],
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "username"],
   credentials: true, // Allow credentials like cookies and tokens
