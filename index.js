@@ -68,7 +68,6 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "build")));
 app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
 
-console.log("NODE_ENV before session--->", process.env.NODE_ENV);
 
 app.use(
   session({
@@ -161,7 +160,7 @@ async function verifyToken(req, res, next) {
     if (user.role === "User") {
       secretKey = process.env.USERSAULTKEY;
     } else if (user.role === "Admin") {
-      secretKey = process.env.ADMINSAULTKEY;
+      secretKey = process.env.ADMINSALTKEY;
     } else {
       return res.status(403).json({
         result: "Fail",
@@ -699,7 +698,6 @@ app.post("/create-user", async (req, res) => {
     })
 
   } catch (error) {
-    console.log("Error occured while creating a new user:", error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -824,17 +822,15 @@ app.post("/login", async (req, res) => {
         .send({ result: "Fail", message: "Invalid Username or Password" });
     }
 
-    const secretKey = generateSecretKey(user.role)
+    const secretKey = generateSecretKey(user.role);
 
     // Check if the secret key exists
     if (!secretKey) {
-      throw new Error(
-        "Secret key is not defined. Check environment variables."
-      );
+      throw new Error("Secret key is not defined. Check environment variables.");
     }
 
     // Sign JWT token
-    const token = jwt.sign({ id: user._id}, secretKey);
+    const token = jwt.sign({ id: user._id }, secretKey);
 
     // Check if the tokens array length is less than 3 (optional logic)
     if (user.tokens.length < 3) {
@@ -850,8 +846,6 @@ app.post("/login", async (req, res) => {
       });
     }
   } catch (error) {
-    // Send a 500 error for any unexpected issues
-    console.log("internal server error is:", error.message);
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
@@ -876,7 +870,7 @@ app.post("/register-webauthn/start", async (req, res) => {
     // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
-      rpID: 'localhost',
+      rpID: RPID,
       userID: userID,
       userName: username,
       attestationType: "none",
@@ -895,17 +889,12 @@ app.post("/register-webauthn/start", async (req, res) => {
       supportedAlgorithmIDs: [-7, -257],
     });
 
-    console.log("Generated Registration Options:", options);
-
     // Save the challenge and userID in the session with expiry
     req.session.challenge = {
       value: options.challenge,
       expires: Date.now() + 5 * 60 * 1000, // 5-minute expiry
     };
 
-    // Log session details for debugging
-    console.log("Session Challenge Stored:", req.session.challenge);
-    console.log("Session ID:", req.sessionID);
 
     // Save the session
     await req.session.save((err) => {
@@ -933,7 +922,6 @@ app.post("/register-webauthn/verify", async (req, res) => {
       return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
     }
 
-    console.log("Inside WebAuthN verification:", attestationResponse);
 
     const expectedChallenge = req.session.challenge.value;
     const expectedOrigin = process.env.NODE_ENV === "production"
@@ -943,19 +931,16 @@ app.post("/register-webauthn/verify", async (req, res) => {
       ? 'liveshop-back.onrender.com'
       : 'localhost';
 
-    console.log("Inside the verify register", expectedRPID)
 
     // Proceed with WebAuthn verification process
     const { verified, registrationInfo } = await verifyRegistrationResponse({
       response: attestationResponse,
       expectedChallenge: expectedChallenge,
       expectedOrigin: expectedOrigin,
-      expectedRPID: 'localhost',
+      expectedRPID: expectedRPID,
       supportedAlgorithmIDs: [-7, -257],  // Algorithm support
       requireUserVerification: false
     });
-
-    console.log("reg info inside reg verify", registrationInfo.rpID)
 
     if (verified && registrationInfo) {
       // Save credentials in user model
@@ -967,8 +952,6 @@ app.post("/register-webauthn/verify", async (req, res) => {
       if (!credentialID) {
         throw new Error("Missing credentialID in registrationInfo");
       };
-
-      console.log("CredentialID during reg", credentialID)
 
       // Push new credentials to the user's WebAuthn credentials
       user.webAuthnCredentials.push({
@@ -1004,7 +987,6 @@ app.post("/webauthn/login", async (req, res) => {
         .status(404)
         .send({ result: "Fail", message: "User not found" });
     }
-    console.log("Stored Credential ID:", user.webAuthnCredentials);
 
     // Check if the user has any WebAuthn credentials
     if (!user.webAuthnCredentials || user.webAuthnCredentials.length === 0) {
@@ -1012,10 +994,14 @@ app.post("/webauthn/login", async (req, res) => {
         result: "Fail",
         message: "No WebAuthn credentials found for this user",
       });
-    }
+    };
+
+    const RPID = process.env.NODE_ENV === 'production'
+    ? 'liveshop-back.onrender.com'  // Your exact Render backend URL
+    : 'localhost';
 
     const options = await generateAuthenticationOptions({
-      rpID: 'localhost',
+      rpID: RPID,
       allowCredentials: user.webAuthnCredentials.map((cred) => ({
         id: cred.credentialId,
         type: "public-key",
@@ -1024,12 +1010,6 @@ app.post("/webauthn/login", async (req, res) => {
       userVerification: "preferred",
     });
 
-    console.log("Transports during login:", options.allowCredentials[0].transports);
-
-    // Log the credential ID for debugging
-    console.log("Credential ID during login:", options.allowCredentials[0].id);
-
-    console.log("Options of login", options)
 
     req.session.challenge = options.challenge;
     return res.send(options);
@@ -1046,7 +1026,6 @@ app.post("/login-webauthn/verify", async (req, res) => {
   try {
     const { username, authResponse } = req.body;
 
-    console.log("Auth response received:", authResponse);
 
     // Find user in the database
     const user = await User.findOne({ username });
@@ -1072,14 +1051,13 @@ app.post("/login-webauthn/verify", async (req, res) => {
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
+    const expectedRPID = process.env.NODE_ENV === 'production'
+    ? 'liveshop-back.onrender.com'  // Your exact Render backend URL
+    : 'localhost';;
 
-    const expectedRPID = 'localhost';
-
-    console.log("inside login verify", expectedRPID);
-
-    // Pass the authResponse directly for verification
+    // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
-      response: authResponse,  // Pass the entire authResponse directly
+      response: authResponse,
       expectedChallenge,
       expectedOrigin,
       expectedRPID,
@@ -1090,9 +1068,6 @@ app.post("/login-webauthn/verify", async (req, res) => {
       requireUserVerification: false,
     });
 
-    console.log("Autheticationinfo", authenticationInfo);
-    console.log("Verified", verified);
-
     if (verified) {
       // Update the counter in the database to prevent replay attacks
       credential.counter = authenticationInfo.newCounter;
@@ -1101,14 +1076,13 @@ app.post("/login-webauthn/verify", async (req, res) => {
       // Clear the challenge from session after verification
       req.session.challenge = null;
 
-      const secretKey = generateSecretKey(user.role)
+      const secretKey = generateSecretKey(user.role);
 
       // Generate a JWT token upon successful login
       const token = jwt.sign({ id: user._id }, secretKey);
-      console.log("Token --->", token)
 
       // Send the token back to the client
-      res.send({ result: "Done", token:token, verified: verified, data:user }); // sending the response strucutre to frontend for it to read the token,user data, and verified
+      res.send({ result: "Done", token: token, verified: verified, data: user });
     } else {
       res.status(400).send({ result: "Fail", message: "Authentication failed" });
     }
@@ -1117,7 +1091,6 @@ app.post("/login-webauthn/verify", async (req, res) => {
     res.status(500).send({ result: "fail", message: "Internal Server Error during login verification" });
   }
 });
-
 
 //api for logout
 app.post("/logout", async (req, res) => {
@@ -1140,7 +1113,7 @@ app.post("/logoutall", async (req, res) => {
     await data.save();
     res.send({ result: "Done", message: "You Logged Out from All Device!!!" });
   } catch (error) {
-    console.log(error);
+   
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
