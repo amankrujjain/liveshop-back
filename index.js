@@ -77,7 +77,7 @@ app.use(
     }),
     cookie: {
       secure: true, // Secure should be true only in production with HTTPS.
-      httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
+      httpOnly: false,// This ensures the cookie is not accessible via client-side JS.
       maxAge: 1000 * 60 * 15, // 15-minute expiration.
       sameSite: 'None', // 'None' for cross-site cookies in production, 'Lax' for development.
     },
