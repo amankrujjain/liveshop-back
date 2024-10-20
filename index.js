@@ -47,15 +47,11 @@ const allowedOrigins = [
 
 require("./dbConnect");
 const app = express();
+app.use(express.json({ limit: '10mb' }));  // Increase payload size limit
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 const corsOptions = {
-  origin: (origin, callback) => {
-    if (allowedOrigins.includes(origin) || !origin) {
-      callback(null, true); // Allow requests from allowed origins or undefined origins (e.g., Postman)
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: ["http://localhost:3000","https://liveshop-front.vercel.app"],
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "username"],
   credentials: true, // Allow credentials like cookies and tokens
@@ -99,7 +95,7 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage: storage });
+const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 }, });
 
 var schema = new passwordValidator();
 schema
@@ -134,12 +130,9 @@ const transporter = nodemailer.createTransport({
 
 async function verifyToken(req, res, next) {
   try {
-    // Extract token from Authorization header (and remove 'Bearer ' prefix)
-    const token =
-      req.headers.authorization && req.headers.authorization.split(" ")[1];
-    const username = req.headers.username;
+    const token = req.headers.authorization && req.headers.authorization.split(" ")[1];
+    const username = req.headers.username; // Username required for general user checks
 
-    // Ensure both token and username exist
     if (!token || !username) {
       return res.status(401).json({
         result: "Fail",
@@ -147,61 +140,74 @@ async function verifyToken(req, res, next) {
       });
     }
 
-    // Find the user by username
+    const decoded = jwt.verify(token, process.env.USERSAULTKEY); // Use general user secret key
     const user = await User.findOne({ username });
+    
     if (!user) {
-      return res
-        .status(401)
-        .json({ result: "Fail", message: "User not found" });
+      return res.status(401).json({ result: "Fail", message: "User not found" });
     }
 
-    // Determine the appropriate secret key based on user role
-    let secretKey;
-    if (user.role === "User") {
-      secretKey = process.env.USERSAULTKEY;
-    } else if (user.role === "Admin") {
-      secretKey = process.env.ADMINSALTKEY;
-    } else {
+    req.user = user; // Attach user to request
+    req.token = token;
+    next();
+  } catch (error) {
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        result: "Fail",
+        message: "Session expired, please log in again",
+      });
+    } else if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        result: "Fail",
+        message: "Invalid token, please log in again",
+      });
+    }
+    res.status(500).json({ result: "Fail", message: "Internal Server Error" });
+  }
+}
+
+
+async function verifyAdmin(req, res, next) {
+  try {
+    const token = req.headers.authorization && req.headers.authorization.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({
+        result: "Fail",
+        message: "Authorization token is missing",
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.ADMINSAULTKEY); // Admin secret key
+    const user = await User.findById(decoded.id); // Get user based on ID from token
+
+    if (!user || user.role !== "Admin") {
       return res.status(403).json({
         result: "Fail",
         message: "You are not authorized to access this resource",
       });
     }
 
-    // Verify the JWT token
-    const decoded = jwt.verify(token, secretKey);
-
-    // Check if the token exists in the user's tokens array
-    if (!user.tokens.includes(token)) {
-      return res.status(401).json({
-        result: "Fail",
-        message: "Invalid token or session has expired, please log in again",
-      });
-    }
-
-    // Attach the user and token information to the request object for further use
     req.user = user;
     req.token = token;
-
-    // Proceed to the next middleware
     next();
   } catch (error) {
-    // Specific handling for expired tokens
     if (error.name === "TokenExpiredError") {
       return res.status(401).json({
         result: "Fail",
         message: "Session expired, please log in again",
       });
+    } else if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        result: "Fail",
+        message: "Invalid token, please log in again",
+      });
     }
-
-    // Handle invalid or other errors related to token verification
-    console.error("Token verification error:", error.message);
-    return res.status(401).json({
-      result: "Fail",
-      message: "You are not authorized to access this resource",
-    });
+    res.status(500).json({ result: "Fail", message: "Internal Server Error" });
   }
 }
+
+
 //Payment API
 app.post("/orders", verifyToken, async (req, res) => {
   try {
@@ -253,8 +259,9 @@ app.put("/payment-verify", verifyToken, async (req, res) => {
 });
 
 //API for maincategory
-app.post("/maincategory", verifyToken, async (req, res) => {
+app.post("/create-maincategory", verifyAdmin, async (req, res) => {
   try {
+    
     var data = new Maincategory(req.body);
     await data.save();
     res.send({ result: "Done", message: "Maincategory is Created!!!!!" });
@@ -273,15 +280,16 @@ app.post("/maincategory", verifyToken, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/maincategory", async (req, res) => {
+app.get("/get-maincategory",async (req, res) => {
   try {
     var data = await Maincategory.find();
-    res.send({ result: "Done", data: data });
+    res.status(200).json({ result: "Done", data: data });
   } catch (error) {
-    res.status(500).send({ result: "Fail", message: "Internal Server Error" });
+    console.log("error",error)
+    res.status(500).json({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/maincategory/:_id", verifyToken, async (req, res) => {
+app.get("/get-single-maincategory/:_id", async (req, res) => {
   try {
     var data = await Maincategory.findOne({ _id: req.params._id });
     if (data) res.send({ result: "Done", data: data });
@@ -290,7 +298,7 @@ app.get("/maincategory/:_id", verifyToken, async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/maincategory/:_id", verifyToken, async (req, res) => {
+app.put("/maincategory/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Maincategory.findOne({ _id: req.params._id });
     if (data) {
@@ -313,7 +321,7 @@ app.put("/maincategory/:_id", verifyToken, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.delete("/maincategory/:_id", verifyToken, async (req, res) => {
+app.delete("/delete-maincategory/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Maincategory.findOne({ _id: req.params._id });
     if (data) {
@@ -326,7 +334,7 @@ app.delete("/maincategory/:_id", verifyToken, async (req, res) => {
 });
 
 //API for subcategory
-app.post("/subcategory", verifyToken, async (req, res) => {
+app.post("/create-subcategory", verifyAdmin, async (req, res) => {
   try {
     var data = new Subcategory(req.body);
     await data.save();
@@ -346,7 +354,7 @@ app.post("/subcategory", verifyToken, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/subcategory", async (req, res) => {
+app.get("/get-all-subcategory", async (req, res) => {
   try {
     var data = await Subcategory.find();
     res.send({ result: "Done", data: data });
@@ -354,7 +362,7 @@ app.get("/subcategory", async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/subcategory/:_id", verifyToken, async (req, res) => {
+app.get("/get-single-subcategory/:_id", async (req, res) => {
   try {
     var data = await Subcategory.findOne({ _id: req.params._id });
     if (data) res.send({ result: "Done", data: data });
@@ -363,7 +371,7 @@ app.get("/subcategory/:_id", verifyToken, async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/subcategory/:_id", verifyToken, async (req, res) => {
+app.put("/update-subcategory/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Subcategory.findOne({ _id: req.params._id });
     if (data) {
@@ -386,7 +394,7 @@ app.put("/subcategory/:_id", verifyToken, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.delete("/subcategory/:_id", verifyToken, async (req, res) => {
+app.delete("/delete-subcategory/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Subcategory.findOne({ _id: req.params._id });
     if (data) {
@@ -399,7 +407,7 @@ app.delete("/subcategory/:_id", verifyToken, async (req, res) => {
 });
 
 //API for brand
-app.post("/brand", verifyToken, async (req, res) => {
+app.post("/create-brand", verifyAdmin, async (req, res) => {
   try {
     var data = new Brand(req.body);
     await data.save();
@@ -419,7 +427,7 @@ app.post("/brand", verifyToken, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/brand", async (req, res) => {
+app.get("/get-all-brand", async (req, res) => {
   try {
     var data = await Brand.find();
     res.send({ result: "Done", data: data });
@@ -427,7 +435,7 @@ app.get("/brand", async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/brand/:_id", verifyToken, async (req, res) => {
+app.get("/get-single-brand/:_id", async (req, res) => {
   try {
     var data = await Brand.findOne({ _id: req.params._id });
     if (data) res.send({ result: "Done", data: data });
@@ -436,7 +444,7 @@ app.get("/brand/:_id", verifyToken, async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/brand/:_id", verifyToken, async (req, res) => {
+app.put("/update-brand/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Brand.findOne({ _id: req.params._id });
     if (data) {
@@ -459,7 +467,7 @@ app.put("/brand/:_id", verifyToken, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.delete("/brand/:_id", verifyToken, async (req, res) => {
+app.delete("/delete-brand/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Brand.findOne({ _id: req.params._id });
     if (data) {
@@ -472,64 +480,43 @@ app.delete("/brand/:_id", verifyToken, async (req, res) => {
 });
 
 //API for Product
-app.post(
-  "/product",
-  upload.fields([
-    { name: "pic1", maxCount: 1 },
-    { name: "pic2", maxCount: 2 },
-    { name: "pic3", maxCount: 3 },
-    { name: "pic4", maxCount: 4 },
-  ]),
-  async (req, res) => {
-    try {
-      var data = new Product(req.body);
-      if (req.files && req.files.pic1) data.pic1 = req.files.pic1[0].filename;
-      if (req.files && req.files.pic2) data.pic2 = req.files.pic2[0].filename;
-      if (req.files && req.files.pic3) data.pic3 = req.files.pic3[0].filename;
-      if (req.files && req.files.pic4) data.pic4 = req.files.pic4[0].filename;
-      await data.save();
-      res.send({ result: "Done", message: "Product is Created!!!!!" });
-    } catch (error) {
-      if (error.errors.name)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.name.message });
-      else if (error.errors.maincategory)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.maincategory.message });
-      else if (error.errors.subcategory)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.subcategory.message });
-      else if (error.errors.brand)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.brand.message });
-      else if (error.errors.color)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.color.message });
-      else if (error.errors.size)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.size.message });
-      else if (error.errors.baseprice)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.baseprice.message });
-      else if (error.errors.finalprice)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.finalprice.message });
-      else
-        res
-          .status(500)
-          .send({ result: "Fail", message: "Internal Server Error" });
-    }
+app.post('/create-product', upload.fields([
+  { name: 'pic1', maxCount: 1 },
+  { name: 'pic2', maxCount: 1 },
+  { name: 'pic3', maxCount: 1 },
+  { name: 'pic4', maxCount: 1 },
+]), async (req, res) => {
+  try {
+    // Handle text data and file upload data
+    const productData = req.body;  // This will contain text fields like name, category, etc.
+    const productImages = req.files;  // This will contain files
+
+    const newProduct = {
+      name: productData.name,
+      maincategory: productData.maincategory,
+      subcategory: productData.subcategory,
+      brand: productData.brand,
+      color: productData.color,
+      size: productData.size,
+      baseprice: productData.baseprice,
+      discount: productData.discount,
+      finalprice: productData.finalprice,
+      stock: productData.stock,
+      description: productData.description,
+      pic1: productImages.pic1[0].filename,
+      pic2: productImages.pic2[0].filename,
+      pic3: productImages.pic3[0].filename,
+      pic4: productImages.pic4[0].filename,
+    };
+
+    // Save the new product to the database (your save logic here)
+    res.status(201).send({ result: "Done", message: "Product created successfully!" });
+  } catch (error) {
+    res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
-);
-app.get("/product", async (req, res) => {
+});
+
+app.get("/get-all-product", async (req, res) => {
   try {
     var data = await Product.find();
     res.send({ result: "Done", data: data });
@@ -537,7 +524,7 @@ app.get("/product", async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/product/:_id", async (req, res) => {
+app.get("/get-single-product/:_id", async (req, res) => {
   try {
     var data = await Product.findOne({ _id: req.params._id });
     if (data) res.send({ result: "Done", data: data });
@@ -547,7 +534,7 @@ app.get("/product/:_id", async (req, res) => {
   }
 });
 app.put(
-  "/product/:_id",
+  "/update-product/:_id",
   upload.fields([
     { name: "pic1", maxCount: 1 },
     { name: "pic2", maxCount: 2 },
@@ -639,7 +626,7 @@ app.put(
     }
   }
 );
-app.delete("/product/:_id", verifyToken, async (req, res) => {
+app.delete("/delete-product/:_id", verifyToken, async (req, res) => {
   try {
     var data = await Product.findOne({ _id: req.params._id });
     if (data) {
@@ -704,7 +691,7 @@ app.post("/create-user", async (req, res) => {
     })
   }
 });
-app.get("/user", verifyToken, async (req, res) => {
+app.get("/user", async (req, res) => {
   try {
     var data = await User.find();
     res.send({ result: "Done", data: data });
@@ -712,7 +699,7 @@ app.get("/user", verifyToken, async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/user/:_id", verifyToken, async (req, res) => {
+app.get("/user/:_id", async (req, res) => {
   try {
     var data = await User.findOne({ _id: req.params._id });
     if (data) res.send({ result: "Done", data: data });
@@ -721,7 +708,7 @@ app.get("/user/:_id", verifyToken, async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/user/:_id", verifyToken, upload.single("pic"), async (req, res) => {
+app.put("/user/:_id", upload.single("pic"), async (req, res) => {
   try {
     // Find the user by ID
     const user = await User.findOne({ _id: req.params._id });
@@ -785,7 +772,7 @@ app.put("/user/:_id", verifyToken, upload.single("pic"), async (req, res) => {
     }
   }
 });
-app.delete("/user/:_id", verifyToken, async (req, res) => {
+app.delete("/user/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await User.findOne({ _id: req.params._id });
     if (data) {
@@ -1022,7 +1009,6 @@ app.post("/login-webauthn/verify", async (req, res) => {
   try {
     const { username, authResponse } = req.body;
 
-
     // Find user in the database
     const user = await User.findOne({ username });
     if (!user) {
@@ -1057,7 +1043,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
       expectedRPID,
       authenticator: {
         counter: credential.counter,
-        credentialPublicKey: isoBase64URL.toBuffer(credential.publicKey), // previously getting error as the public key needs to be decoded again to buffer
+        credentialPublicKey: isoBase64URL.toBuffer(credential.publicKey),
       },
       requireUserVerification: false,
     });
@@ -1075,8 +1061,21 @@ app.post("/login-webauthn/verify", async (req, res) => {
       // Generate a JWT token upon successful login
       const token = jwt.sign({ id: user._id }, secretKey);
 
-      // Send the token back to the client
-      res.send({ result: "Done", token: token, verified: verified, data: user });
+      // Token storage logic (similar to the normal login flow)
+      if (user.tokens.length < 3) {
+        user.tokens.push(token); // Add the new token
+        await user.save(); // Save user with the new token
+
+        // Send the token back to the client
+        res.send({ result: "Done", token: token, verified: verified, data: user });
+      } else {
+        // Token limit reached, deny login
+        res.status(401).send({
+          result: "Fail",
+          message:
+            "You are already logged in from 3 devices. Please log out from another device to log in here.",
+        });
+      }
     } else {
       res.status(400).send({ result: "Fail", message: "Authentication failed" });
     }
@@ -1087,30 +1086,74 @@ app.post("/login-webauthn/verify", async (req, res) => {
 });
 
 //api for logout
+// Logout from a single session
 app.post("/logout", async (req, res) => {
   try {
-    let data = await User.findOne({ username: req.body.username });
-    var index = data.tokens.findIndex((item) => item === req.body.token);
-    if (index != -1) {
-      data.tokens.splice(index, 1);
-      await data.save();
+    const { username, token } = req.body
+
+    // Ensure both token and username exist
+    if (!token || !username) {
+      return res.status(400).json({
+        result: "Fail",
+        message: "Token or username is missing",
+      });
     }
-    res.send({ result: "Done", message: "You Logged Out!!!" });
+
+    // Find the user by username
+    let user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ result: "Fail", message: "User not found" });
+    }
+
+    // Find the token in the user's tokens array
+    const tokenIndex = user.tokens.findIndex((item) => item === token);
+    if (tokenIndex === -1) {
+      return res.status(401).json({
+        result: "Fail",
+        message: "Token not found or already logged out",
+      });
+    }
+
+    // Remove the token from the tokens array and save the user
+    user.tokens.splice(tokenIndex, 1);
+    await user.save();
+
+    res.status(200).send({ result: "Done", message: "You have logged out successfully" });
   } catch (error) {
+    console.error("Logout Error:", error);
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
+
+// Logout from all sessions
 app.post("/logoutall", async (req, res) => {
   try {
-    let data = await User.findOne({ username: req.body.username });
-    data.tokens = [];
-    await data.save();
-    res.send({ result: "Done", message: "You Logged Out from All Device!!!" });
+    const { username, token } = req.body
+    // Ensure username exists
+    if (!username) {
+      return res.status(400).json({
+        result: "Fail",
+        message: "Username is missing",
+      });
+    }
+
+    // Find the user by username
+    let user = await User.findOne({ username });
+    if (!user) {
+      return res.status(404).json({ result: "Fail", message: "User not found" });
+    }
+
+    // Clear all tokens
+    user.tokens = [];
+    await user.save();
+
+    res.status(200).send({ result: "Done", message: "You have been logged out from all devices" });
   } catch (error) {
-   
+    console.error("Logout All Error:", error);
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
+
 
 //API for Cart
 app.post("/cart", verifyToken, async (req, res) => {
