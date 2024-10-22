@@ -54,10 +54,10 @@ const corsOptions = {
   origin: ["https://liveshop-front.vercel.app", "http://localhost:3000"],
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "username"],
-  // credentials: true, // Allow credentials like cookies and tokens
+  credentials: true, // Allow credentials like cookies and tokens
 };
 app.use(cors(corsOptions));
-
+// 
 app.options("*", cors(corsOptions));
 
 app.use(express.json());
