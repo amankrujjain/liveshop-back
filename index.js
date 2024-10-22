@@ -990,7 +990,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
 // WebAuthn Login Start
 app.post("/webauthn/login", async (req, res) => {
   try {
-    const { username } = req.body;
+    const { sessionID, username } = req.body;
     const user = await User.findOne({ username });
 
     if (!user) {
@@ -1021,9 +1021,19 @@ app.post("/webauthn/login", async (req, res) => {
       userVerification: "preferred",
     });
 
+    const session = await SessionModel.findById(sessionID);
+    if (!session) {
+      return res.status(400).send({ result: "fail", message: "Invalid session ID" });
+    };
 
-    req.session.challenge = options.challenge;
-    return res.send(options);
+    session.data.challenge = options.challenge;
+    session.data.expires = Date.now() + 5 * 60 * 1000; // Extend expiry by 5 minutes
+    await session.save();
+
+    console.log("Updated session with challenge:", session);
+
+    // Send the WebAuthn options and sessionID to the client
+    return res.status(200).json({ options, sessionID });
   } catch (error) {
     console.error("Error during WebAuthN login start:", error.message);
     res.status(500).send({
@@ -1035,7 +1045,7 @@ app.post("/webauthn/login", async (req, res) => {
 
 app.post("/login-webauthn/verify", async (req, res) => {
   try {
-    const { username, authResponse } = req.body;
+    const { username, authResponse, sessionID  } = req.body;
 
     // Find user in the database
     const user = await User.findOne({ username });
@@ -1043,8 +1053,14 @@ app.post("/login-webauthn/verify", async (req, res) => {
       return res.status(404).send({ result: "Fail", message: "User not found" });
     }
 
+    const session = await SessionModel.findById(sessionID);
+    if (!session) {
+      return res.status(400).send({ result: "Fail", message: "Invalid session ID" });
+    };
+
+
     // Check if session contains challenge
-    const expectedChallenge = req.session?.challenge;
+    const expectedChallenge = session.data.challenge;
     if (!expectedChallenge) {
       return res.status(400).send({ result: "Fail", message: "Challenge missing or session expired" });
     }
@@ -1084,7 +1100,8 @@ app.post("/login-webauthn/verify", async (req, res) => {
       await user.save();
 
       // Clear the challenge from session after verification
-      req.session.challenge = null;
+      session.data.challenge = null; // Clear challenge
+      await session.save();
 
       const secretKey = generateSecretKey(user.role);
 
