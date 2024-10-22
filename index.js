@@ -1100,7 +1100,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
       await user.save();
 
       // Clear the challenge from session after verification
-      session.data.challenge = null; // Clear challenge
+      delete session.data.challenge; // Clear challenge
       await session.save();
 
       const secretKey = generateSecretKey(user.role);
