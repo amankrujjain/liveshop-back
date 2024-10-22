@@ -897,7 +897,6 @@ app.post("/register-webauthn/start", async (req, res) => {
     });
 
     // Save the challenge and userID in the session with expiry
-    const sessionID = uuidv4();  // Generate a unique session ID
     const sessionData = {
       challenge: options.challenge,
       userID: userID,  // base64URL-encoded user ID
@@ -905,11 +904,16 @@ app.post("/register-webauthn/start", async (req, res) => {
     };
 
     // Save the session in MongoDB using the custom session model
-    await SessionModel.create({ sessionID: sessionID, data: sessionData })
-    console.log("Cookies during registration", req.session)
+    const session = new SessionModel({ data: sessionData });
+    await session.save();
 
-    // Send the options object as the response
-    return res.send(options);
+    // Use the MongoDB-generated _id as the sessionID
+    const sessionID = session._id;
+
+    console.log("Session stored in MongoDB:", session);
+
+    // Send the sessionID and WebAuthn options as the response
+    return res.send({ options, sessionID });
   } catch (error) {
     console.error("Error during WebAuthN registration start:", error.message);
     res.status(500).send({ result: "fail", message: "Internal Server Error during registration start" });
