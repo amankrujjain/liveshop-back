@@ -76,13 +76,31 @@ app.use(
       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
     }),
     cookie: {
-      secure: frontendUrl, // Secure should be true only in production with HTTPS.
+      secure: true, // Secure should be true only in production with HTTPS.
       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
       maxAge: 1000 * 60 * 15, // 15-minute expiration.
-      sameSite: frontendUrl ? 'None' : 'Lax', // 'None' for cross-site cookies in production, 'Lax' for development.
+      sameSite: 'None', // 'None' for cross-site cookies in production, 'Lax' for development.
     },
   })
 );
+// app.use(
+//   session({
+//     secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
+//     resave: false, // Prevent session resave if nothing changes.
+//     saveUninitialized: false, // Set to true to save empty sessions during testing.
+//     store: MongoStore.create({
+//       mongoUrl: process.env.MONGODB_URL, // Use your testing MongoDB instance.
+//       collectionName: "sessions", // The sessions will be stored in the 'sessions' collection.
+//       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
+//     }),
+//     cookie: {
+//       secure: false, // Secure should be true only in production with HTTPS.
+//       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
+//       maxAge: 1000 * 60 * 15, // 15-minute expiration.
+//       sameSite: 'Lax', // 'None' for cross-site cookies in production, 'Lax' for development.
+//     },
+//   })
+// );
 
 console.log("NODE_ENV after session--->", process.env.NODE_ENV);
 const storage = multer.diskStorage({
