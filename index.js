@@ -912,7 +912,7 @@ app.post("/register-webauthn/start", async (req, res) => {
     console.log("Session stored in MongoDB:", session);
 
     // Send the sessionID and WebAuthn options as the response
-    return res.send({ options, sessionID });
+    return res.status(200).json({ options, sessionID });
   } catch (error) {
     console.error("Error during WebAuthN registration start:", error);
     res.status(500).send({ result: "fail", message: "Internal Server Error during registration start" });
