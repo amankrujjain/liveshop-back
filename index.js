@@ -19,7 +19,7 @@ const {
 
 require("dotenv").config();
 
-const session = require("express-session");
+const SessionModel = require('./models/SessionModel');
 const MongoStore = require("connect-mongo");
 const crypto = require("crypto");
 const generateSecretKey = require('./helpers/generateSecretKey')
@@ -54,7 +54,7 @@ const corsOptions = {
   origin: ["https://liveshop-front.vercel.app", "http://localhost:3000"],
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "username"],
-  credentials: true, // Allow credentials like cookies and tokens
+  // credentials: true, // Allow credentials like cookies and tokens
 };
 app.use(cors(corsOptions));
 
@@ -65,24 +65,24 @@ app.use(express.static(path.join(__dirname, "build")));
 app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
 
 
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
-    resave: false, // Prevent session resave if nothing changes.
-    saveUninitialized: false, // Set to true to save empty sessions during testing.
-    store: MongoStore.create({
-      mongoUrl: process.env.MONGODB_URL, // Use your testing MongoDB instance.
-      collectionName: "sessions", // The sessions will be stored in the 'sessions' collection.
-      ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
-    }),
-    cookie: {
-      secure: true, // Secure should be true only in production with HTTPS.
-      httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
-      maxAge: 1000 * 60 * 15, // 15-minute expiration.
-      sameSite: 'None', // 'None' for cross-site cookies in production, 'Lax' for development.
-    },
-  })
-);
+// app.use(
+//   session({
+//     secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
+//     resave: false, // Prevent session resave if nothing changes.
+//     saveUninitialized: false, // Set to true to save empty sessions during testing.
+//     store: MongoStore.create({
+//       mongoUrl: process.env.MONGODB_URL, // Use your testing MongoDB instance.
+//       collectionName: "sessions", // The sessions will be stored in the 'sessions' collection.
+//       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
+//     }),
+//     cookie: {
+//       secure: true, // Secure should be true only in production with HTTPS.
+//       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
+//       maxAge: 1000 * 60 * 15, // 15-minute expiration.
+//       sameSite: 'None', // 'None' for cross-site cookies in production, 'Lax' for development.
+//     },
+//   })
+// );
 // app.use(
 //   session({
 //     secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
@@ -160,7 +160,7 @@ async function verifyToken(req, res, next) {
 
     const decoded = jwt.verify(token, process.env.USERSAULTKEY); // Use general user secret key
     const user = await User.findOne({ username });
-    
+
     if (!user) {
       return res.status(401).json({ result: "Fail", message: "User not found" });
     }
@@ -279,7 +279,7 @@ app.put("/payment-verify", verifyToken, async (req, res) => {
 //API for maincategory
 app.post("/create-maincategory", verifyAdmin, async (req, res) => {
   try {
-    
+
     var data = new Maincategory(req.body);
     await data.save();
     res.send({ result: "Done", message: "Maincategory is Created!!!!!" });
@@ -298,12 +298,12 @@ app.post("/create-maincategory", verifyAdmin, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/get-maincategory",async (req, res) => {
+app.get("/get-maincategory", async (req, res) => {
   try {
     var data = await Maincategory.find();
     res.status(200).json({ result: "Done", data: data });
   } catch (error) {
-    console.log("error",error)
+    console.log("error", error)
     res.status(500).json({ result: "Fail", message: "Internal Server Error" });
   }
 });
@@ -790,6 +790,7 @@ app.put("/user/:_id", upload.single("pic"), async (req, res) => {
     }
   }
 });
+
 app.delete("/user/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await User.findOne({ _id: req.params._id });
@@ -870,7 +871,7 @@ app.post("/register-webauthn/start", async (req, res) => {
     const userID = isoUint8Array.fromUTF8String(user._id.toString());
 
     const origin = req.headers.origin;
-    console.log("Origin",origin)
+    console.log("Origin", origin)
     const RPID = process.env.NODE_ENV === 'production' ? "liveshop-front.vercel.app" : 'localhost';
 
     // Generate WebAuthn registration options with userID in base64URL and challenge
@@ -896,20 +897,16 @@ app.post("/register-webauthn/start", async (req, res) => {
     });
 
     // Save the challenge and userID in the session with expiry
-    req.session.challenge = {
-      value: options.challenge,
-      expires: Date.now() + 5 * 60 * 1000, // 5-minute expiry
+    const sessionID = uuidv4();  // Generate a unique session ID
+    const sessionData = {
+      challenge: options.challenge,
+      userID: userID,  // base64URL-encoded user ID
+      expires: Date.now() + 5 * 60 * 1000,  // 5 minutes expiry
     };
 
+    // Save the session in MongoDB using the custom session model
+    await SessionModel.create({ sessionID: sessionID, data: sessionData })
     console.log("Cookies during registration", req.session)
-    // Save the session
-    await req.session.save((err) => {
-      if (err) {
-        console.error("Error saving session:", err);
-      } else {
-        console.log("Session saved successfully.");
-      }
-    });
 
     // Send the options object as the response
     return res.send(options);
@@ -921,18 +918,20 @@ app.post("/register-webauthn/start", async (req, res) => {
 
 app.post("/register-webauthn/verify", async (req, res) => {
   try {
-    const { username, attestationResponse } = req.body;
+    const { sessionID, username, attestationResponse } = req.body;
 
-    console.log("inside verification", req.session)
+    const session = await SessionModel.findOne({ sessionID });
 
-
-    // Validate session existence and challenge in session
-    if (!req.session || !req.session.challenge) {
-      return res.status(400).send({ result: "fail", message: "Challenge missing in session or session expired" });
+    if (!session || !session.data.challenge) {
+      return res.status(400).send({ result: "fail", message: "Session expired or invalid." });
     }
 
+    // Verify session expiry
+    if (session.data.expires < Date.now()) {
+      return res.status(400).send({ result: "fail", message: "Session expired." });
+    }
 
-    const expectedChallenge = req.session.challenge.value;
+    const expectedChallenge = session.data.challenge;
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
@@ -1060,8 +1059,8 @@ app.post("/login-webauthn/verify", async (req, res) => {
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === "production"
-    ? "liveshop-front.vercel.app"
-    : "localhost";;
+      ? "liveshop-front.vercel.app"
+      : "localhost";;
 
     // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
