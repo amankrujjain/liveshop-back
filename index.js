@@ -883,9 +883,9 @@ app.post("/register-webauthn/start", async (req, res) => {
       attestationType: "none",
       allowCredentials: [],
       authenticatorSelection: {
-        authenticatorAttachment: 'platform',  // Use platform authenticator (e.g., Face ID, Touch ID)
+        // authenticatorAttachment: 'platform',  // Use platform authenticator (e.g., Face ID, Touch ID)
         userVerification: 'preferred',  // Allow biometric authentication
-        residentKey: 'required',
+        residentKey: 'discouraged',
       },
       excludeCredentials: user.webAuthnCredentials.map(cred => ({
         id: cred.credentialId,
