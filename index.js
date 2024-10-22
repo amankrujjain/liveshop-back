@@ -853,12 +853,12 @@ app.post("/register-webauthn/start", async (req, res) => {
 
     const origin = req.headers.origin;
     console.log("Origin",origin)
-    const RPID = process.env.NODE_ENV === 'production' ? 'liveshop-back.onrender.com' : 'localhost';
+    const RPID = process.env.NODE_ENV === 'production' ? "https://liveshop-front.vercel.app" : 'localhost';
 
     // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
       rpName: "LiveShop",
-      rpID: 'localhost',
+      rpID: RPID,
       userID: userID,
       userName: username,
       attestationType: "none",
@@ -919,7 +919,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === 'production'
-      ? 'liveshop-back.onrender.com'
+      ? "https://liveshop-front.vercel.app"
       : 'localhost';
 
 
@@ -928,7 +928,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
       response: attestationResponse,
       expectedChallenge: expectedChallenge,
       expectedOrigin: expectedOrigin,
-      expectedRPID: 'localhost',
+      expectedRPID: expectedRPID,
       supportedAlgorithmIDs: [-7, -257],  // Algorithm support
       requireUserVerification: false
     });
@@ -986,9 +986,13 @@ app.post("/webauthn/login", async (req, res) => {
         message: "No WebAuthn credentials found for this user",
       });
     }
+    const RPID = process.env.NODE_ENV === 'production'
+      ? "https://liveshop-front.vercel.app"
+      : 'localhost';
+
 
     const options = await generateAuthenticationOptions({
-      rpID: 'localhost',
+      rpID: RPID,
       allowCredentials: user.webAuthnCredentials.map((cred) => ({
         id: cred.credentialId,
         type: "public-key",
@@ -1037,7 +1041,9 @@ app.post("/login-webauthn/verify", async (req, res) => {
     const expectedOrigin = process.env.NODE_ENV === "production"
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
-    const expectedRPID = 'localhost';
+    const expectedRPID = process.env.NODE_ENV === "production"
+    ? "https://liveshop-front.vercel.app"
+    : "http://localhost:3000";;
 
     // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
