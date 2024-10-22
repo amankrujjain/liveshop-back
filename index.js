@@ -853,7 +853,7 @@ app.post("/register-webauthn/start", async (req, res) => {
 
     const origin = req.headers.origin;
     console.log("Origin",origin)
-    const RPID = process.env.NODE_ENV === 'production' ? "https://liveshop-front.vercel.app" : 'localhost';
+    const RPID = process.env.NODE_ENV === 'production' ? "liveshop-front.vercel.app" : 'localhost';
 
     // Generate WebAuthn registration options with userID in base64URL and challenge
     const options = await generateRegistrationOptions({
@@ -919,7 +919,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === 'production'
-      ? "https://liveshop-front.vercel.app"
+      ? "liveshop-front.vercel.app"
       : 'localhost';
 
 
@@ -987,7 +987,7 @@ app.post("/webauthn/login", async (req, res) => {
       });
     }
     const RPID = process.env.NODE_ENV === 'production'
-      ? "https://liveshop-front.vercel.app"
+      ? "liveshop-front.vercel.app"
       : 'localhost';
 
 
@@ -1042,8 +1042,8 @@ app.post("/login-webauthn/verify", async (req, res) => {
       ? "https://liveshop-front.vercel.app"
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === "production"
-    ? "https://liveshop-front.vercel.app"
-    : "http://localhost:3000";;
+    ? "liveshop-front.vercel.app"
+    : "localhost";;
 
     // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
