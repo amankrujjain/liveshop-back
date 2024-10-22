@@ -1136,13 +1136,13 @@ app.post("/login-webauthn/verify", async (req, res) => {
 // Logout from a single session
 app.post("/logout", async (req, res) => {
   try {
-    const { username, token } = req.body
+    const { username, token, sessionID } = req.body;
 
-    // Ensure both token and username exist
-    if (!token || !username) {
+    // Ensure both token, username, and sessionID exist
+    if (!token || !username || !sessionID) {
       return res.status(400).json({
         result: "Fail",
-        message: "Token or username is missing",
+        message: "Token, session ID, or username is missing",
       });
     }
 
@@ -1152,7 +1152,7 @@ app.post("/logout", async (req, res) => {
       return res.status(404).json({ result: "Fail", message: "User not found" });
     }
 
-    // Find the token in the user's tokens array
+    // Find and remove the token from the user's tokens array
     const tokenIndex = user.tokens.findIndex((item) => item === token);
     if (tokenIndex === -1) {
       return res.status(401).json({
@@ -1160,17 +1160,19 @@ app.post("/logout", async (req, res) => {
         message: "Token not found or already logged out",
       });
     }
-
-    // Remove the token from the tokens array and save the user
     user.tokens.splice(tokenIndex, 1);
     await user.save();
 
-    res.status(200).send({ result: "Done", message: "You have logged out successfully" });
+    // Clear the session from the database
+    await SessionModel.findByIdAndDelete(sessionID);
+
+    res.status(200).send({ result: "Done", message: "You have logged out successfully and session cleared" });
   } catch (error) {
     console.error("Logout Error:", error);
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
+
 
 // Logout from all sessions
 app.post("/logoutall", async (req, res) => {
