@@ -887,7 +887,6 @@ app.post("/register-webauthn/start", async (req, res) => {
         userVerification: 'preferred',  // Allow biometric authentication
         residentKey: 'required',
       },
-      challenge: "thisiswebauthnchallenge", // Automatically handled as base64URL by WebAuthn package
       excludeCredentials: user.webAuthnCredentials.map(cred => ({
         id: cred.credentialId,
         type: 'public-key',
@@ -895,7 +894,7 @@ app.post("/register-webauthn/start", async (req, res) => {
       })),
       supportedAlgorithmIDs: [-7, -257],
     });
-
+    console.log("Generated WebAuthn options:", options);
     // Save the challenge and userID in the session with expiry
     const sessionData = {
       challenge: options.challenge,
@@ -915,7 +914,7 @@ app.post("/register-webauthn/start", async (req, res) => {
     // Send the sessionID and WebAuthn options as the response
     return res.send({ options, sessionID });
   } catch (error) {
-    console.error("Error during WebAuthN registration start:", error.message);
+    console.error("Error during WebAuthN registration start:", error);
     res.status(500).send({ result: "fail", message: "Internal Server Error during registration start" });
   }
 });
