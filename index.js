@@ -16,6 +16,7 @@ const {
   generateAuthenticationOptions,
   verifyAuthenticationResponse
 } = require("@simplewebauthn/server");
+const WebSocket = require('ws');
 
 require("dotenv").config();
 
@@ -101,6 +102,38 @@ app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
 //     },
 //   })
 // );
+
+const wss = new WebSocket.Server({ port: 8080 });
+
+wss.on('connection', (ws) => {
+    console.log('New client connected');
+
+    // Send a welcome message to the newly connected client
+    ws.send('Welcome to the WebSocket server!');
+
+    // Handle messages from the client
+    ws.on('message', (message) => {
+        console.log('Received:', message);
+        // Broadcast the message to all connected clients
+        wss.clients.forEach(client => {
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+                client.send(message);
+            }
+        });
+    });
+
+    ws.on('close', () => {
+        console.log('Client disconnected');
+    });
+
+    // Handle any error
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
+    });
+});
+
+console.log('WebSocket server is running on ws://localhost:8000');
+
 
 console.log("NODE_ENV after session--->", process.env.NODE_ENV);
 const storage = multer.diskStorage({
@@ -923,7 +956,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
   try {
     const { sessionID, username, attestationResponse } = req.body;
 
-    const session = await SessionModel.findOne({ sessionID });
+    const session = await SessionModel.findOne({ _id: sessionID  });
 
     if (!session || !session.data.challenge) {
       return res.status(400).send({ result: "fail", message: "Session expired or invalid." });
@@ -964,6 +997,14 @@ app.post("/register-webauthn/verify", async (req, res) => {
         throw new Error("Missing credentialID in registrationInfo");
       };
 
+      // if(!credentialPublicKey){
+      //   throw new Error("Missing credential Public Key")
+      // };
+
+      // if(!counter){
+      //   throw new Error("Missing counter")
+      // }
+
       // Push new credentials to the user's WebAuthn credentials
       user.webAuthnCredentials.push({
         credentialId: registrationInfo.credentialID, // This should be the credential ID from WebAuthn
@@ -975,6 +1016,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
       });
 
       await user.save();
+      await SessionModel.findByIdAndDelete(sessionID);
 
       res.send({ result: "Done", message: "WebAuthn credentials registered successfully" });
     } else {
@@ -1022,9 +1064,9 @@ app.post("/webauthn/login", async (req, res) => {
     });
 
     const session = await SessionModel.findById(sessionID);
-    if (!session) {
-      return res.status(400).send({ result: "fail", message: "Invalid session ID" });
-    };
+    if (!session || session.data.userID !== isoUint8Array.fromUTF8String(user._id.toString())) {
+      return res.status(400).send({ result: "fail", message: "Session is invalid or does not match the user." });
+    }
 
     session.data.challenge = options.challenge;
     session.data.expires = Date.now() + 5 * 60 * 1000; // Extend expiry by 5 minutes
@@ -1054,9 +1096,9 @@ app.post("/login-webauthn/verify", async (req, res) => {
     }
 
     const session = await SessionModel.findById(sessionID);
-    if (!session) {
-      return res.status(400).send({ result: "Fail", message: "Invalid session ID" });
-    };
+    if (!session || session.data.userID !== isoUint8Array.fromUTF8String(user._id.toString())) {
+      return res.status(400).send({ result: "Fail", message: "Session is invalid or does not match the user." });
+    }
 
 
     // Check if session contains challenge
@@ -1100,8 +1142,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
       await user.save();
 
       // Clear the challenge from session after verification
-      delete session.data.challenge; // Clear challenge
-      await session.save();
+      await SessionModel.findByIdAndDelete(sessionID);
 
       const secretKey = generateSecretKey(user.role);
 
@@ -1133,12 +1174,11 @@ app.post("/login-webauthn/verify", async (req, res) => {
 });
 
 //api for logout
-// Logout from a single session
 app.post("/logout", async (req, res) => {
   try {
     const { username, token, sessionID } = req.body;
 
-    // Ensure both token, username, and sessionID exist
+    // Ensure token, username, and sessionID are provided
     if (!token || !username || !sessionID) {
       return res.status(400).json({
         result: "Fail",
@@ -1152,6 +1192,25 @@ app.post("/logout", async (req, res) => {
       return res.status(404).json({ result: "Fail", message: "User not found" });
     }
 
+    // Verify the token (assuming JWT)
+    let decodedToken;
+    try {
+      decodedToken = jwt.verify(token, generateSecretKey(user.role));  // Validate token
+    } catch (err) {
+      return res.status(401).json({
+        result: "Fail",
+        message: "Invalid token",
+      });
+    }
+
+    // Ensure the token matches the user
+    if (decodedToken.id !== user._id.toString()) {
+      return res.status(403).json({
+        result: "Fail",
+        message: "Token does not match the user",
+      });
+    }
+
     // Find and remove the token from the user's tokens array
     const tokenIndex = user.tokens.findIndex((item) => item === token);
     if (tokenIndex === -1) {
@@ -1160,18 +1219,29 @@ app.post("/logout", async (req, res) => {
         message: "Token not found or already logged out",
       });
     }
-    user.tokens.splice(tokenIndex, 1);
+    user.tokens.splice(tokenIndex, 1); // Remove token from the array
     await user.save();
 
     // Clear the session from the database
+    const session = await SessionModel.findById(sessionID);
+    if (!session) {
+      return res.status(404).json({
+        result: "Fail",
+        message: "Session not found",
+      });
+    }
     await SessionModel.findByIdAndDelete(sessionID);
 
-    res.status(200).send({ result: "Done", message: "You have logged out successfully and session cleared" });
+    res.status(200).json({
+      result: "Done",
+      message: "You have logged out successfully and session cleared",
+    });
   } catch (error) {
     console.error("Logout Error:", error);
-    res.status(500).send({ result: "Fail", message: "Internal Server Error" });
+    res.status(500).json({ result: "Fail", message: "Internal Server Error" });
   }
 });
+
 
 
 // Logout from all sessions
