@@ -106,30 +106,30 @@ app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
 const wss = new WebSocket.Server({ port: 8080 });
 
 wss.on('connection', (ws) => {
-    console.log('New client connected');
+  console.log('New client connected');
 
-    // Send a welcome message to the newly connected client
-    ws.send('Welcome to the WebSocket server!');
+  // Send a welcome message to the newly connected client
+  ws.send('Welcome to the WebSocket server!');
 
-    // Handle messages from the client
-    ws.on('message', (message) => {
-        console.log('Received:', message);
-        // Broadcast the message to all connected clients
-        wss.clients.forEach(client => {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(message);
-            }
-        });
+  // Handle messages from the client
+  ws.on('message', (message) => {
+    console.log('Received:', message);
+    // Broadcast the message to all connected clients
+    wss.clients.forEach(client => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(message);
+      }
     });
+  });
 
-    ws.on('close', () => {
-        console.log('Client disconnected');
-    });
+  ws.on('close', () => {
+    console.log('Client disconnected');
+  });
 
-    // Handle any error
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-    });
+  // Handle any error
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
 });
 
 console.log('WebSocket server is running on ws://localhost:8000');
@@ -929,16 +929,33 @@ app.post("/register-webauthn/start", async (req, res) => {
     });
     console.log("Generated WebAuthn options:", options);
     // Save the challenge and userID in the session with expiry
+    // Assuming userID is in the format produced by isoUint8Array.fromUTF8String(user._id.toString())
+    const originalUserID = isoUint8Array.toUTF8String(userID);
+    console.log("Original userID", originalUserID)
+
     const sessionData = {
       challenge: options.challenge,
-      userID: userID,  // base64URL-encoded user ID
+      userID: originalUserID,  // base64URL-encoded user ID
       expires: Date.now() + 5 * 60 * 1000,  // 5 minutes expiry
     };
 
-    // Save the session in MongoDB using the custom session model
     const session = new SessionModel({ data: sessionData });
-    await session.save();
 
+    try {
+      await session.save();
+      console.log("Session successfully stored in MongoDB with ID:", session._id);
+
+      // Immediately attempt to retrieve the session
+      const storedSession = await SessionModel.findById(session._id);
+      console.log("Retrieved session from DB:", storedSession);
+
+      if (!storedSession) {
+        console.error("Session not found in DB after save.");
+      }
+    } catch (error) {
+      console.error("Failed to save session to MongoDB:", error);
+      return res.status(500).send({ result: "fail", message: "Session storage failed" });
+    }
     // Use the MongoDB-generated _id as the sessionID
     const sessionID = session._id;
 
@@ -956,7 +973,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
   try {
     const { sessionID, username, attestationResponse } = req.body;
 
-    const session = await SessionModel.findOne({ _id: sessionID  });
+    const session = await SessionModel.findOne({ _id: sessionID });
 
     if (!session || !session.data.challenge) {
       return res.status(400).send({ result: "fail", message: "Session expired or invalid." });
@@ -1016,7 +1033,7 @@ app.post("/register-webauthn/verify", async (req, res) => {
       });
 
       await user.save();
-      await SessionModel.findByIdAndDelete(sessionID);
+      // await SessionModel.findByIdAndDelete(sessionID);
 
       res.send({ result: "Done", message: "WebAuthn credentials registered successfully" });
     } else {
@@ -1064,8 +1081,13 @@ app.post("/webauthn/login", async (req, res) => {
     });
 
     const session = await SessionModel.findById(sessionID);
-    if (!session || session.data.userID !== isoUint8Array.fromUTF8String(user._id.toString())) {
-      return res.status(400).send({ result: "fail", message: "Session is invalid or does not match the user." });
+    if (!session) {
+      return res.status(400).send({ result: "fail", message: "Session is invalid or has expired." });
+    }
+
+    // Directly compare the userID from the session to the user's _id string
+    if (session.data.userID !== user._id.toString()) {
+      return res.status(400).send({ result: "fail", message: "Session does not match the user." });
     }
 
     session.data.challenge = options.challenge;
@@ -1087,7 +1109,7 @@ app.post("/webauthn/login", async (req, res) => {
 
 app.post("/login-webauthn/verify", async (req, res) => {
   try {
-    const { username, authResponse, sessionID  } = req.body;
+    const { username, authResponse, sessionID } = req.body;
 
     // Find user in the database
     const user = await User.findOne({ username });
@@ -1096,8 +1118,13 @@ app.post("/login-webauthn/verify", async (req, res) => {
     }
 
     const session = await SessionModel.findById(sessionID);
-    if (!session || session.data.userID !== isoUint8Array.fromUTF8String(user._id.toString())) {
-      return res.status(400).send({ result: "Fail", message: "Session is invalid or does not match the user." });
+    if (!session) {
+      return res.status(400).send({ result: "fail", message: "Session is invalid or has expired." });
+    }
+
+    // Directly compare the userID from the session to the user's _id string
+    if (session.data.userID !== user._id.toString()) {
+      return res.status(400).send({ result: "fail", message: "Session does not match the user." });
     }
 
 
@@ -1142,7 +1169,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
       await user.save();
 
       // Clear the challenge from session after verification
-      await SessionModel.findByIdAndDelete(sessionID);
+      // await SessionModel.findByIdAndDelete(sessionID);
 
       const secretKey = generateSecretKey(user.role);
 
