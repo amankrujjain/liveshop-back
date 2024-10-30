@@ -17,6 +17,8 @@ const {
   verifyAuthenticationResponse
 } = require("@simplewebauthn/server");
 const WebSocket = require('ws');
+const ObjectId = require('mongoose').Types.ObjectId;
+
 
 require("dotenv").config();
 
@@ -1007,38 +1009,32 @@ app.post("/register-webauthn/verify", async (req, res) => {
       // Save credentials in user model
       const user = await User.findOne({ username });
 
-      // Ensure credentialID is present in registrationInfo
       const { credentialID, credentialPublicKey, counter } = registrationInfo;
 
       if (!credentialID) {
         throw new Error("Missing credentialID in registrationInfo");
-      };
-
-      // if(!credentialPublicKey){
-      //   throw new Error("Missing credential Public Key")
-      // };
-
-      // if(!counter){
-      //   throw new Error("Missing counter")
-      // }
+      }
 
       // Push new credentials to the user's WebAuthn credentials
       user.webAuthnCredentials.push({
-        credentialId: registrationInfo.credentialID, // This should be the credential ID from WebAuthn
+        credentialId: registrationInfo.credentialID,
         publicKey: isoBase64URL.fromBuffer(registrationInfo.credentialPublicKey),
         signCount: registrationInfo.counter,
         deviceType: registrationInfo.credentialDeviceType,
         backedUp: registrationInfo.credentialBackedUp,
-        transports: attestationResponse.transports || [],  // Handle transports if applicable
+        transports: attestationResponse.transports || [],
       });
 
       await user.save();
-      // await SessionModel.findByIdAndDelete(sessionID);
+
+      // Delete the session after successful registration
+      await SessionModel.findByIdAndDelete(sessionID);
 
       res.send({ result: "Done", message: "WebAuthn credentials registered successfully" });
     } else {
       return res.status(400).send({ result: "fail", message: "WebAuthn registration verification failed." });
     }
+
 
   } catch (error) {
     console.error("Error during WebAuthN registration verification:", error);
@@ -1049,13 +1045,11 @@ app.post("/register-webauthn/verify", async (req, res) => {
 // WebAuthn Login Start
 app.post("/webauthn/login", async (req, res) => {
   try {
-    const { sessionID, username } = req.body;
+    const { username } = req.body;
     const user = await User.findOne({ username });
 
     if (!user) {
-      return res
-        .status(404)
-        .send({ result: "Fail", message: "User not found" });
+      return res.status(404).send({ result: "Fail", message: "User not found" });
     }
 
     // Check if the user has any WebAuthn credentials
@@ -1065,11 +1059,12 @@ app.post("/webauthn/login", async (req, res) => {
         message: "No WebAuthn credentials found for this user",
       });
     }
+
     const RPID = process.env.NODE_ENV === 'production'
       ? "liveshop-front.vercel.app"
       : 'localhost';
 
-
+    // Generate WebAuthn options for authentication
     const options = await generateAuthenticationOptions({
       rpID: RPID,
       allowCredentials: user.webAuthnCredentials.map((cred) => ({
@@ -1080,24 +1075,20 @@ app.post("/webauthn/login", async (req, res) => {
       userVerification: "preferred",
     });
 
-    const session = await SessionModel.findById(sessionID);
-    if (!session) {
-      return res.status(400).send({ result: "fail", message: "Session is invalid or has expired." });
-    }
+    // Create a new session specific to this login attempt
+    const sessionData = {
+      challenge: options.challenge,
+      userID: user._id,  // Keep as ObjectId without converting to a string
+      expires: Date.now() + 5 * 60 * 1000,  // Expire in 5 minutes
+    };
 
-    // Directly compare the userID from the session to the user's _id string
-    if (session.data.userID !== user._id.toString()) {
-      return res.status(400).send({ result: "fail", message: "Session does not match the user." });
-    }
-
-    session.data.challenge = options.challenge;
-    session.data.expires = Date.now() + 5 * 60 * 1000; // Extend expiry by 5 minutes
+    const session = new SessionModel({ data: sessionData });
     await session.save();
 
-    console.log("Updated session with challenge:", session);
+    console.log("New session created for login with ID:", session._id);
 
-    // Send the WebAuthn options and sessionID to the client
-    return res.status(200).json({ options, sessionID });
+    // Send the WebAuthn options and the new sessionID to the client
+    return res.status(200).json({ options, sessionID: session._id });
   } catch (error) {
     console.error("Error during WebAuthN login start:", error.message);
     res.status(500).send({
@@ -1106,6 +1097,7 @@ app.post("/webauthn/login", async (req, res) => {
     });
   }
 });
+
 
 app.post("/login-webauthn/verify", async (req, res) => {
   try {
@@ -1122,19 +1114,19 @@ app.post("/login-webauthn/verify", async (req, res) => {
       return res.status(400).send({ result: "fail", message: "Session is invalid or has expired." });
     }
 
-    // Directly compare the userID from the session to the user's _id string
-    if (session.data.userID !== user._id.toString()) {
+    // Convert session.data.userID to ObjectId and compare with user._id
+    if (!ObjectId(session.data.userID).equals(user._id)) {
       return res.status(400).send({ result: "fail", message: "Session does not match the user." });
     }
 
 
-    // Check if session contains challenge
+    // Check if session contains a valid challenge
     const expectedChallenge = session.data.challenge;
     if (!expectedChallenge) {
       return res.status(400).send({ result: "Fail", message: "Challenge missing or session expired" });
     }
 
-    // Find user's WebAuthn credentials
+    // Find user's WebAuthn credential
     const credential = user.webAuthnCredentials.find(
       (cred) => cred.credentialId === authResponse.id
     );
@@ -1148,7 +1140,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
       : "http://localhost:3000";
     const expectedRPID = process.env.NODE_ENV === "production"
       ? "liveshop-front.vercel.app"
-      : "localhost";;
+      : "localhost";
 
     // Verify the WebAuthn authentication response
     const { verified, authenticationInfo } = await verifyAuthenticationResponse({
@@ -1168,8 +1160,8 @@ app.post("/login-webauthn/verify", async (req, res) => {
       credential.counter = authenticationInfo.newCounter;
       await user.save();
 
-      // Clear the challenge from session after verification
-      // await SessionModel.findByIdAndDelete(sessionID);
+      // Delete the session after successful verification
+      await SessionModel.findByIdAndDelete(sessionID);
 
       const secretKey = generateSecretKey(user.role);
 
@@ -1203,18 +1195,18 @@ app.post("/login-webauthn/verify", async (req, res) => {
 //api for logout
 app.post("/logout", async (req, res) => {
   try {
-    const { username, token, sessionID } = req.body;
+    const { username, token } = req.body;
 
-    // Ensure token, username, and sessionID are provided
-    if (!token || !username || !sessionID) {
+    // Ensure token and username are provided
+    if (!token || !username) {
       return res.status(400).json({
         result: "Fail",
-        message: "Token, session ID, or username is missing",
+        message: "Token or username is missing",
       });
     }
 
     // Find the user by username
-    let user = await User.findOne({ username });
+    const user = await User.findOne({ username });
     if (!user) {
       return res.status(404).json({ result: "Fail", message: "User not found" });
     }
@@ -1246,28 +1238,20 @@ app.post("/logout", async (req, res) => {
         message: "Token not found or already logged out",
       });
     }
+
     user.tokens.splice(tokenIndex, 1); // Remove token from the array
     await user.save();
 
-    // Clear the session from the database
-    const session = await SessionModel.findById(sessionID);
-    if (!session) {
-      return res.status(404).json({
-        result: "Fail",
-        message: "Session not found",
-      });
-    }
-    await SessionModel.findByIdAndDelete(sessionID);
-
     res.status(200).json({
       result: "Done",
-      message: "You have logged out successfully and session cleared",
+      message: "You have logged out successfully",
     });
   } catch (error) {
     console.error("Logout Error:", error);
     res.status(500).json({ result: "Fail", message: "Internal Server Error" });
   }
 });
+
 
 
 
