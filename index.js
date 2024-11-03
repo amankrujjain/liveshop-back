@@ -68,43 +68,6 @@ app.use(express.static(path.join(__dirname, "build")));
 app.use("/uploads", express.static(path.join(__dirname, "public/uploads")));
 
 
-// app.use(
-//   session({
-//     secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
-//     resave: false, // Prevent session resave if nothing changes.
-//     saveUninitialized: false, // Set to true to save empty sessions during testing.
-//     store: MongoStore.create({
-//       mongoUrl: process.env.MONGODB_URL, // Use your testing MongoDB instance.
-//       collectionName: "sessions", // The sessions will be stored in the 'sessions' collection.
-//       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
-//     }),
-//     cookie: {
-//       secure: true, // Secure should be true only in production with HTTPS.
-//       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
-//       maxAge: 1000 * 60 * 15, // 15-minute expiration.
-//       sameSite: 'None', // 'None' for cross-site cookies in production, 'Lax' for development.
-//     },
-//   })
-// );
-// app.use(
-//   session({
-//     secret: process.env.SESSION_SECRET, // This can be hardcoded for now, but ensure it's secure.
-//     resave: false, // Prevent session resave if nothing changes.
-//     saveUninitialized: false, // Set to true to save empty sessions during testing.
-//     store: MongoStore.create({
-//       mongoUrl: process.env.MONGODB_URL, // Use your testing MongoDB instance.
-//       collectionName: "sessions", // The sessions will be stored in the 'sessions' collection.
-//       ttl: 14 * 24 * 60 * 60, // Session TTL set to 14 days (for testing, this is fine).
-//     }),
-//     cookie: {
-//       secure: false, // Secure should be true only in production with HTTPS.
-//       httpOnly: true,       // This ensures the cookie is not accessible via client-side JS.
-//       maxAge: 1000 * 60 * 15, // 15-minute expiration.
-//       sameSite: 'Lax', // 'None' for cross-site cookies in production, 'Lax' for development.
-//     },
-//   })
-// );
-
 const wss = new WebSocket.Server({ port: 8080 });
 
 wss.on('connection', (ws) => {
@@ -148,7 +111,14 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 }, });
+const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter:(req,file,cb)=>{
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif'];
+  if(allowedTypes.includes(file.mimetype)){
+    cb(null, true)
+  }else{
+    cb( new multer.MulterError('Invalid file type. Only JPEG, PNG, WEBP, AVIF flies are allowed'))
+  }
+}});
 
 var schema = new passwordValidator();
 schema
@@ -533,41 +503,83 @@ app.delete("/delete-brand/:_id", verifyAdmin, async (req, res) => {
 });
 
 //API for Product
-app.post('/create-product', upload.fields([
-  { name: 'pic1', maxCount: 1 },
-  { name: 'pic2', maxCount: 1 },
-  { name: 'pic3', maxCount: 1 },
-  { name: 'pic4', maxCount: 1 },
-]), async (req, res) => {
-  try {
-    // Handle text data and file upload data
-    const productData = req.body;  // This will contain text fields like name, category, etc.
-    const productImages = req.files;  // This will contain files
+app.post(
+  '/create-product',
+  verifyAdmin,
+  (req, res, next) => {
+    // Handle the multer upload with fields and custom error handling
+    upload.fields([
+      { name: 'pic1', maxCount: 1 },
+      { name: 'pic2', maxCount: 1 },
+      { name: 'pic3', maxCount: 1 },
+      { name: 'pic4', maxCount: 1 },
+    ])(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        // Multer-specific errors
+       if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({
+            result: 'Fail',
+            message: 'File size exceeds the 10MB limit.',
+          });
+        }
+        return res.status(400).json({
+          result: 'Fail',
+          message: 'Invalid file type. Only JPEG, PNG, WEBP, and AVIF files are allowed.',
+        });
+      } else if (err) {
+        // General errors
+        console.error('File upload error:', err);
+        return res.status(500).json({
+          result: 'Fail',
+          message: 'Internal server error during file upload.',
+        });
+      }
+      next();
+    });
+  },
+  async (req, res) => {
+    try {
+      // Handle text data and file upload data
+      const productData = req.body; // This will contain text fields like name, category, etc.
+      const productImages = req.files; // This will contain files
 
-    const newProduct = {
-      name: productData.name,
-      maincategory: productData.maincategory,
-      subcategory: productData.subcategory,
-      brand: productData.brand,
-      color: productData.color,
-      size: productData.size,
-      baseprice: productData.baseprice,
-      discount: productData.discount,
-      finalprice: productData.finalprice,
-      stock: productData.stock,
-      description: productData.description,
-      pic1: productImages.pic1[0].filename,
-      pic2: productImages.pic2[0].filename,
-      pic3: productImages.pic3[0].filename,
-      pic4: productImages.pic4[0].filename,
-    };
+      // Create a new Product instance with both text and file data
+      const newProduct = new Product({
+        name: productData.name,
+        maincategory: productData.maincategory,
+        subcategory: productData.subcategory,
+        brand: productData.brand,
+        color: productData.color,
+        size: productData.size,
+        baseprice: productData.baseprice,
+        discount: productData.discount,
+        finalprice: productData.finalprice,
+        stock: productData.stock,
+        description: productData.description,
+        pic1: productImages.pic1 ? productImages.pic1[0].filename : null,
+        pic2: productImages.pic2 ? productImages.pic2[0].filename : null,
+        pic3: productImages.pic3 ? productImages.pic3[0].filename : null,
+        pic4: productImages.pic4 ? productImages.pic4[0].filename : null,
+      });
 
-    // Save the new product to the database (your save logic here)
-    res.status(201).send({ result: "Done", message: "Product created successfully!" });
-  } catch (error) {
-    res.status(500).send({ result: "Fail", message: "Internal Server Error" });
+      // Save the new product to the database
+      await newProduct.save();
+
+      return res.status(201).json({
+        result: 'Done',
+        message: 'Product created successfully!',
+        data: newProduct,
+      });
+    } catch (error) {
+      console.error("Error while creating the product:", error);
+      return res.status(500).json({
+        result: 'Fail',
+        message: 'Failed to create product. Please check all input fields and try again.',
+      });
+    }
   }
-});
+);
+
 
 app.get("/get-all-product", async (req, res) => {
   try {
@@ -588,17 +600,45 @@ app.get("/get-single-product/:_id", async (req, res) => {
 });
 app.put(
   "/update-product/:_id",
-  upload.fields([
-    { name: "pic1", maxCount: 1 },
-    { name: "pic2", maxCount: 2 },
-    { name: "pic3", maxCount: 3 },
-    { name: "pic4", maxCount: 4 },
-  ]),
-  verifyToken,
+  (req, res, next) => {
+    upload.fields([
+      { name: "pic1", maxCount: 1 },
+      { name: "pic2", maxCount: 1 },
+      { name: "pic3", maxCount: 1 },
+      { name: "pic4", maxCount: 1 },
+    ])(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        // Handle multer-specific errors
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            result: "Fail",
+            message: "File size exceeds the 10MB limit.",
+          });
+        }
+        return res.status(400).json({
+          result: "Fail",
+          message: "Invalid file type. Only JPEG, PNG, WEBP, and AVIF files are allowed.",
+        });
+      } else if (err) {
+        // General errors
+        console.error("File upload error:", err);
+        return res.status(500).json({
+          result: "Fail",
+          message: "Internal server error during file upload.",
+        });
+      }
+      next();
+    });
+  },
+  verifyAdmin,
   async (req, res) => {
     try {
-      var data = await Product.findOne({ _id: req.params._id });
+      console.log("Request Body:", req.body);
+      console.log("Request Files:", req.files);
+
+      const data = await Product.findOne({ _id: req.params._id });
       if (data) {
+        // Update fields if provided in req.body or req.files
         data.name = req.body.name ?? data.name;
         data.maincategory = req.body.maincategory ?? data.maincategory;
         data.subcategory = req.body.subcategory ?? data.subcategory;
@@ -610,76 +650,49 @@ app.put(
         data.finalprice = req.body.finalprice ?? data.finalprice;
         data.stock = req.body.stock ?? data.stock;
         data.description = req.body.description ?? data.description;
-        if (req.files && req.files.pic1) {
-          try {
-            fs.unlink("./public/uploads/" + data.pic1, () => { });
-          } catch (error) {
-            console.log(error);
-          }
+
+        // Update images if provided in req.files
+        if (req.files.pic1) {
+          fs.unlink(`./public/uploads/${data.pic1}`, (err) => {
+            if (err) console.error("Error deleting old pic1:", err);
+          });
           data.pic1 = req.files.pic1[0].filename;
         }
-        if (req.files && req.files.pic2) {
-          try {
-            fs.unlink("./public/uploads/" + data.pic2, () => { });
-          } catch (error) { }
+        if (req.files.pic2) {
+          fs.unlink(`./public/uploads/${data.pic2}`, (err) => {
+            if (err) console.error("Error deleting old pic2:", err);
+          });
           data.pic2 = req.files.pic2[0].filename;
         }
-        if (req.files && req.files.pic3) {
-          try {
-            fs.unlink("./public/uploads/" + data.pic3, () => { });
-          } catch (error) { }
+        if (req.files.pic3) {
+          fs.unlink(`./public/uploads/${data.pic3}`, (err) => {
+            if (err) console.error("Error deleting old pic3:", err);
+          });
           data.pic3 = req.files.pic3[0].filename;
         }
-        if (req.files && req.files.pic4) {
-          try {
-            fs.unlink("./public/uploads/" + data.pic4, () => { });
-          } catch (error) { }
+        if (req.files.pic4) {
+          fs.unlink(`./public/uploads/${data.pic4}`, (err) => {
+            if (err) console.error("Error deleting old pic4:", err);
+          });
           data.pic4 = req.files.pic4[0].filename;
         }
+
         await data.save();
-        res.send({ result: "Done", message: "Record is Updated!!!!!" });
-      } else res.status(404).send({ result: "Fail", message: "Invalid ID" });
+        return res.json({ result: "Done", message: "Record is Updated!" });
+      } else {
+        return res.status(404).json({ result: "Fail", message: "Invalid ID" });
+      }
     } catch (error) {
-      if (error.errors.name)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.name.message });
-      else if (error.errors.maincategory)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.maincategory.message });
-      else if (error.errors.subcategory)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.subcategory.message });
-      else if (error.errors.brand)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.brand.message });
-      else if (error.errors.color)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.color.message });
-      else if (error.errors.size)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.size.message });
-      else if (error.errors.baseprice)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.baseprice.message });
-      else if (error.errors.finalprice)
-        res
-          .status(401)
-          .send({ result: "Fail", message: error.errors.finalprice.message });
-      else
-        res
-          .status(500)
-          .send({ result: "Fail", message: "Internal Server Error" });
+      console.error("Error updating product:", error);
+      const message = error.errors
+        ? error.errors[Object.keys(error.errors)[0]].message
+        : "Internal Server Error";
+      return res.status(500).json({ result: "Fail", message });
     }
   }
 );
-app.delete("/delete-product/:_id", verifyToken, async (req, res) => {
+
+app.delete("/delete-product/:_id", verifyAdmin, async (req, res) => {
   try {
     var data = await Product.findOne({ _id: req.params._id });
     if (data) {
@@ -699,6 +712,7 @@ app.delete("/delete-product/:_id", verifyToken, async (req, res) => {
       res.send({ result: "Done", message: "Record is Deleted!!!!!" });
     } else res.status(404).send({ result: "Fail", message: "Invalid ID" });
   } catch (error) {
+    console.log("Error while deleting the product", error)
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
