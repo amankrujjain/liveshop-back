@@ -25,7 +25,8 @@ require("dotenv").config();
 const SessionModel = require('./models/SessionModel');
 const MongoStore = require("connect-mongo");
 const crypto = require("crypto");
-const generateSecretKey = require('./helpers/generateSecretKey')
+const generateSecretKey = require('./helpers/generateSecretKey');
+const authMiddleware = require('./helpers/authMiddleware');
 
 const Maincategory = require("./models/Maincategory");
 const Subcategory = require("./models/Subcategory");
@@ -111,14 +112,16 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter:(req,file,cb)=>{
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif'];
-  if(allowedTypes.includes(file.mimetype)){
-    cb(null, true)
-  }else{
-    cb( new multer.MulterError('Invalid file type. Only JPEG, PNG, WEBP, AVIF flies are allowed'))
+const upload = multer({
+  storage: storage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/avif'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true)
+    } else {
+      cb(new multer.MulterError('Invalid file type. Only JPEG, PNG, WEBP, AVIF flies are allowed'))
+    }
   }
-}});
+});
 
 var schema = new passwordValidator();
 schema
@@ -190,47 +193,6 @@ async function verifyToken(req, res, next) {
 }
 
 
-async function verifyAdmin(req, res, next) {
-  try {
-    const token = req.headers.authorization && req.headers.authorization.split(" ")[1];
-
-    if (!token) {
-      return res.status(401).json({
-        result: "Fail",
-        message: "Authorization token is missing",
-      });
-    }
-
-    const decoded = jwt.verify(token, process.env.ADMINSAULTKEY); // Admin secret key
-    const user = await User.findById(decoded.id); // Get user based on ID from token
-
-    if (!user || user.role !== "Admin") {
-      return res.status(403).json({
-        result: "Fail",
-        message: "You are not authorized to access this resource",
-      });
-    }
-
-    req.user = user;
-    req.token = token;
-    next();
-  } catch (error) {
-    if (error.name === "TokenExpiredError") {
-      return res.status(401).json({
-        result: "Fail",
-        message: "Session expired, please log in again",
-      });
-    } else if (error.name === "JsonWebTokenError") {
-      return res.status(401).json({
-        result: "Fail",
-        message: "Invalid token, please log in again",
-      });
-    }
-    res.status(500).json({ result: "Fail", message: "Internal Server Error" });
-  }
-}
-
-
 //Payment API
 app.post("/orders", verifyToken, async (req, res) => {
   try {
@@ -282,13 +244,14 @@ app.put("/payment-verify", verifyToken, async (req, res) => {
 });
 
 //API for maincategory
-app.post("/create-maincategory", verifyAdmin, async (req, res) => {
+app.post("/create-maincategory", authMiddleware("Admin"), async (req, res) => {
   try {
 
     var data = new Maincategory(req.body);
     await data.save();
     res.send({ result: "Done", message: "Maincategory is Created!!!!!" });
   } catch (error) {
+    console.log(error)
     if (error.keyValue)
       res
         .status(401)
@@ -321,7 +284,7 @@ app.get("/get-single-maincategory/:_id", async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/maincategory/:_id", verifyAdmin, async (req, res) => {
+app.put("/maincategory/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Maincategory.findOne({ _id: req.params._id });
     if (data) {
@@ -344,7 +307,7 @@ app.put("/maincategory/:_id", verifyAdmin, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.delete("/delete-maincategory/:_id", verifyAdmin, async (req, res) => {
+app.delete("/delete-maincategory/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Maincategory.findOne({ _id: req.params._id });
     if (data) {
@@ -357,7 +320,7 @@ app.delete("/delete-maincategory/:_id", verifyAdmin, async (req, res) => {
 });
 
 //API for subcategory
-app.post("/create-subcategory", verifyAdmin, async (req, res) => {
+app.post("/create-subcategory", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = new Subcategory(req.body);
     await data.save();
@@ -394,7 +357,7 @@ app.get("/get-single-subcategory/:_id", async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/update-subcategory/:_id", verifyAdmin, async (req, res) => {
+app.put("/update-subcategory/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Subcategory.findOne({ _id: req.params._id });
     if (data) {
@@ -417,7 +380,7 @@ app.put("/update-subcategory/:_id", verifyAdmin, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.delete("/delete-subcategory/:_id", verifyAdmin, async (req, res) => {
+app.delete("/delete-subcategory/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Subcategory.findOne({ _id: req.params._id });
     if (data) {
@@ -430,7 +393,7 @@ app.delete("/delete-subcategory/:_id", verifyAdmin, async (req, res) => {
 });
 
 //API for brand
-app.post("/create-brand", verifyAdmin, async (req, res) => {
+app.post("/create-brand", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = new Brand(req.body);
     await data.save();
@@ -467,7 +430,7 @@ app.get("/get-single-brand/:_id", async (req, res) => {
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.put("/update-brand/:_id", verifyAdmin, async (req, res) => {
+app.put("/update-brand/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Brand.findOne({ _id: req.params._id });
     if (data) {
@@ -490,7 +453,7 @@ app.put("/update-brand/:_id", verifyAdmin, async (req, res) => {
         .send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.delete("/delete-brand/:_id", verifyAdmin, async (req, res) => {
+app.delete("/delete-brand/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Brand.findOne({ _id: req.params._id });
     if (data) {
@@ -505,7 +468,7 @@ app.delete("/delete-brand/:_id", verifyAdmin, async (req, res) => {
 //API for Product
 app.post(
   '/create-product',
-  verifyAdmin,
+  authMiddleware("Admin"),
   (req, res, next) => {
     // Handle the multer upload with fields and custom error handling
     upload.fields([
@@ -516,7 +479,7 @@ app.post(
     ])(req, res, (err) => {
       if (err instanceof multer.MulterError) {
         // Multer-specific errors
-       if (err.code === 'LIMIT_FILE_SIZE') {
+        if (err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({
             result: 'Fail',
             message: 'File size exceeds the 10MB limit.',
@@ -630,7 +593,7 @@ app.put(
       next();
     });
   },
-  verifyAdmin,
+  authMiddleware("Admin"),
   async (req, res) => {
     try {
       console.log("Request Body:", req.body);
@@ -692,7 +655,7 @@ app.put(
   }
 );
 
-app.delete("/delete-product/:_id", verifyAdmin, async (req, res) => {
+app.delete("/delete-product/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await Product.findOne({ _id: req.params._id });
     if (data) {
@@ -840,7 +803,7 @@ app.put("/user/:_id", upload.single("pic"), async (req, res) => {
   }
 });
 
-app.delete("/user/:_id", verifyAdmin, async (req, res) => {
+app.delete("/user/:_id", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = await User.findOne({ _id: req.params._id });
     if (data) {
@@ -885,7 +848,7 @@ app.post("/login", async (req, res) => {
     }
 
     // Sign JWT token
-    const token = jwt.sign({ id: user._id }, secretKey);
+    const token = jwt.sign({ id: user._id, role: user.role }, secretKey, { expiresIn: '1h' });
 
     // Check if the tokens array length is less than 3 (optional logic)
     if (user.tokens.length < 3) {
@@ -1180,7 +1143,7 @@ app.post("/login-webauthn/verify", async (req, res) => {
       const secretKey = generateSecretKey(user.role);
 
       // Generate a JWT token upon successful login
-      const token = jwt.sign({ id: user._id }, secretKey);
+      const token = jwt.sign({ id: user._id, role: user.role }, secretKey, { expiresIn: '1h' });
 
       // Token storage logic (similar to the normal login flow)
       if (user.tokens.length < 3) {
@@ -1300,76 +1263,101 @@ app.post("/logoutall", async (req, res) => {
 
 
 //API for Cart
-app.post("/cart", verifyToken, async (req, res) => {
-  try {
-    var data = new Cart(req.body);
-    await data.save();
-    res.send({ result: "Done", message: "Cart is Created!!!!!" });
-  } catch (error) {
-    if (error.errors.userid)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.userid.message });
-    else if (error.errors.productid)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.productid.message });
-    else if (error.errors.name)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.name.message });
-    else if (error.errors.maincategory)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.maincategory.message });
-    else if (error.errors.subcategory)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.subcategory.message });
-    else if (error.errors.brand)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.brand.message });
-    else if (error.errors.color)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.color.message });
-    else if (error.errors.size)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.size.message });
-    else if (error.errors.price)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.price.message });
-    else if (error.errors.total)
-      res
-        .status(401)
-        .send({ result: "Fail", message: error.errors.total.message });
-    else
-      res
-        .status(500)
-        .send({ result: "Fail", message: "Internal Server Error" });
+
+const mongoose = require("mongoose");
+
+app.post(
+  "/add-to-cart/user/:userId/product/:productId",
+  authMiddleware(["Admin", "User"]),
+  async (req, res) => {
+    const { userId, productId } = req.params;
+    const { quantity } = req.body;
+
+    // Validate userId and productId
+    if (!mongoose.Types.ObjectId.isValid(userId) || !mongoose.Types.ObjectId.isValid(productId)) {
+      console.log("Validation failed: Invalid User ID or Product ID", { userId, productId });
+      return res.status(400).send({
+        result: "Fail",
+        message: "Invalid User ID or Product ID",
+      });
+    }
+
+    try {
+      console.log("Cart data received:", { userId, productId, quantity });
+
+      // Find existing cart for the user
+      let cart = await Cart.findOne({ userId });
+      console.log("Existing cart:", cart);
+
+      if (cart) {
+        // Check if the product already exists in the cart
+        const productIndex = cart.products.findIndex(
+          (item) => item.productId.toString() === productId
+        );
+        console.log("Product index in cart:", productIndex);
+
+        if (productIndex >= 0) {
+          // Increment quantity for the existing product
+          const existingQuantity = cart.products[productIndex].quantity;
+          console.log(
+            `Updating quantity for product. Existing: ${existingQuantity}, Adding: ${quantity || 1}`
+          );
+          cart.products[productIndex].quantity += quantity || 1;
+        } else {
+          // Add the new product to the cart
+          console.log("Adding new product to cart:", { productId, quantity: quantity || 1 });
+          cart.products.push({ productId, quantity: quantity || 1 });
+        }
+      } else {
+        // Create a new cart if none exists
+        console.log("No existing cart found. Creating a new cart.");
+        cart = new Cart({
+          userId,
+          products: [{ productId, quantity: quantity || 1 }],
+        });
+      }
+
+      // Save the cart to the database
+      console.log("Saving cart to database...");
+      await cart.save();
+      console.log("Cart saved successfully.");
+
+      // Respond with success
+      res.status(200).send({
+        result: "Done",
+        message: "Product added/updated in cart",
+        cart,
+      });
+    } catch (error) {
+      console.error("Error adding to cart:", error);
+
+      // Respond with internal server error
+      res.status(500).send({
+        result: "Fail",
+        message: "Internal Server Error",
+      });
+    }
   }
-});
-app.get("/cartUser/:userid", verifyToken, async (req, res) => {
+);
+
+
+app.get("/cart-item/user/:userId", authMiddleware(["User", "Admin"]), async (req, res) => {
   try {
-    var data = await Cart.find({ userid: req.params.userid });
-    res.send({ result: "Done", data: data });
+    const { userId } = req.params; // Fetch userId from request params
+    const data = await Cart.findOne({ userId }).populate("products.productId"); // Populate product details
+    
+    if (data) {
+      res.send({ result: "Done", data: data.products || [] }); // Return only products array
+    } else {
+      res.status(404).send({ result: "Fail", message: "No cart items found for this user" });
+    }
   } catch (error) {
+    console.error("Error fetching cart items:", error);
     res.status(500).send({ result: "Fail", message: "Internal Server Error" });
   }
 });
-app.get("/cart/:_id", verifyToken, async (req, res) => {
-  try {
-    var data = await Cart.findOne({ _id: req.params._id });
-    if (data) res.send({ result: "Done", data: data });
-    else res.status(404).send({ result: "Fail", message: "Invalid ID" });
-  } catch (error) {
-    res.status(500).send({ result: "Fail", message: "Internal Server Error" });
-  }
-});
-app.put("/cart/:_id", verifyToken, async (req, res) => {
+
+app.put("/cartUser/:_id", verifyToken, async (req, res) => {
   try {
     var data = await Cart.findOne({ _id: req.params._id });
     if (data) {
@@ -1480,7 +1468,7 @@ app.delete("/wishlist/:_id", verifyToken, async (req, res) => {
 });
 
 //API for Checkout
-app.post("/checkout", verifyToken, async (req, res) => {
+app.post("/checkout", authMiddleware("Admin"), async (req, res) => {
   try {
     var data = new Checkout(req.body);
     await data.save();

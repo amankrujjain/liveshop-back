@@ -8,7 +8,6 @@ const decodedBuffer = isoBase64URL.toBuffer(base64URLString);
 
 console.log(decodedBuffer);
 
-
 // Convert Buffer or Uint8Array back to base64URL string
 const encodedBase64URL = isoBase64URL.fromBuffer(decodedBuffer);
 

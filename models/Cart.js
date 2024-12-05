@@ -1,54 +1,33 @@
-const mongoose = require("mongoose")
+const mongoose = require("mongoose");
 
 const CartSchema = new mongoose.Schema({
-    userid:{
-        type:String,
-        required:[true,"User Id Must Required"]
-    },
-    productid:{
-        type:String,
-        required:[true,"Product Id Must Required"]
-    },
-    name:{
-        type:String,
-        required:[true,"Product Name Must Required"]
-    },
-    maincategory:{
-        type:String,
-        required:[true,"Maincategory Name Must Required"]
-    },
-    subcategory:{
-        type:String,
-        required:[true,"Subcategory Name Must Required"]
-    },
-    brand:{
-        type:String,
-        required:[true,"Brand Name Must Required"]
-    },
-    color:{
-        type:String,
-        required:[true,"Color Must Required"]
-    },
-    size:{
-        type:String,
-        required:[true,"Size Must Required"]
-    },
-    price:{
-        type:Number,
-        required:[true,"Price Must Required"]
-    },
-    qty:{
-        type:Number,
-        default:1
-    },
-    total:{
-        type:Number,
-        required:[true,"Total Must Required"]
-    },
-    pic:{
-        type:String,
-        default:""
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: true
+  },
+  products: [
+    {
+      productId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Product",
+        required: true
+      },
+      quantity: {
+        type: Number,
+        default: 1
+      }
     }
-})
-const Cart = new mongoose.model("Cart",CartSchema)
-module.exports = Cart
+  ],
+  createdOn: {
+    type: Date,
+    default: Date.now()
+  },
+  isNotified: {
+    type: Boolean,
+    default: false
+  }
+});
+
+const Cart = mongoose.model("Cart", CartSchema);
+module.exports = Cart;
